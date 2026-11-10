@@ -519,7 +519,9 @@ jobs:
                               if (focused) blue else panel,
                               12
                           )
-                          view.setTextColor(if (focused) white else secondary)
+                          (view as TextView).setTextColor(
+                              if (focused) white else secondary
+                          )
                       }
                   }
 
@@ -592,7 +594,9 @@ jobs:
                                   if (focused) blue else Color.TRANSPARENT,
                                   10
                               )
-                              view.setTextColor(if (focused) white else secondary)
+                              (view as TextView).setTextColor(
+                                  if (focused) white else secondary
+                              )
                           }
 
                           setOnClickListener { action() }
