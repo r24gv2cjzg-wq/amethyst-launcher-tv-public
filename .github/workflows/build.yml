@@ -25,11 +25,20 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Extract source
+        run: |
+          mkdir source
+          unzip AmethystLauncher-source.zip -d source
+          find source -name settings.gradle.kts
+
       - name: Build APK
-        run: gradle assembleDebug
+        run: |
+          PROJECT_DIR=$(dirname "$(find source -name settings.gradle.kts | head -n 1)")
+          cd "$PROJECT_DIR"
+          gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Amethyst-Launcher-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: source/**/app/build/outputs/apk/debug/app-debug.apk
