@@ -1,4 +1,4 @@
-name: Amethyst Launcher PS Edition
+name: Amethyst Launcher PS Edition 6.0
 
 on:
   workflow_dispatch:
@@ -75,8 +75,8 @@ jobs:
                   applicationId = "com.amethyst.launcher"
                   minSdk = 23
                   targetSdk = 28
-                  versionCode = 5
-                  versionName = "5.0"
+                  versionCode = 6
+                  versionName = "6.0"
               }
 
               compileOptions {
@@ -159,26 +159,26 @@ jobs:
 
           class MainActivity : Activity() {
 
-              private val white = Color.WHITE
-              private val muted = Color.rgb(170, 181, 205)
-              private val blue = Color.rgb(65, 125, 255)
-              private val dark = Color.rgb(5, 8, 19)
-
               private lateinit var root: FrameLayout
-              private lateinit var backdrop: View
-              private lateinit var heroTitle: TextView
-              private lateinit var heroSubtitle: TextView
-              private lateinit var heroIcon: ImageView
+              private lateinit var background: View
               private lateinit var rail: LinearLayout
               private lateinit var railScroll: HorizontalScrollView
-              private lateinit var sectionTitle: TextView
-              private lateinit var libraryButton: TextView
+              private lateinit var title: TextView
+              private lateinit var subtitle: TextView
+              private lateinit var heroIcon: ImageView
               private lateinit var clock: TextView
+              private lateinit var count: TextView
 
               private val apps = mutableListOf<AppEntry>()
-              private var selectedPackage = ""
+
+              private var selected = 0
               private var libraryMode = false
               private var mediaMode = false
+
+              private val blue = Color.rgb(65, 125, 255)
+              private val white = Color.WHITE
+              private val muted = Color.rgb(177, 190, 215)
+              private val dark = Color.rgb(5, 8, 19)
 
               data class AppEntry(
                   val name: String,
@@ -189,7 +189,7 @@ jobs:
               private fun dp(value: Int): Int =
                   (value * resources.displayMetrics.density).toInt()
 
-              private fun gradient(
+              private fun bg(
                   colors: IntArray,
                   radius: Int = 0
               ) = GradientDrawable(
@@ -199,7 +199,7 @@ jobs:
                   cornerRadius = dp(radius).toFloat()
               }
 
-              private fun text(
+              private fun label(
                   value: String,
                   size: Float,
                   color: Int = white,
@@ -210,6 +210,37 @@ jobs:
                   setTextColor(color)
                   gravity = Gravity.CENTER_VERTICAL
                   if (bold) setTypeface(null, Typeface.BOLD)
+              }
+
+              private fun palette(index: Int): IntArray {
+                  val palettes = arrayOf(
+                      intArrayOf(
+                          Color.rgb(17, 65, 135),
+                          Color.rgb(8, 22, 57),
+                          dark
+                      ),
+                      intArrayOf(
+                          Color.rgb(75, 35, 112),
+                          Color.rgb(24, 15, 52),
+                          dark
+                      ),
+                      intArrayOf(
+                          Color.rgb(15, 91, 91),
+                          Color.rgb(8, 35, 49),
+                          dark
+                      ),
+                      intArrayOf(
+                          Color.rgb(120, 55, 35),
+                          Color.rgb(48, 22, 28),
+                          dark
+                      ),
+                      intArrayOf(
+                          Color.rgb(45, 58, 120),
+                          Color.rgb(17, 23, 55),
+                          dark
+                      )
+                  )
+                  return palettes[index.mod(palettes.size)]
               }
 
               override fun onCreate(savedInstanceState: Bundle?) {
@@ -223,27 +254,33 @@ jobs:
                       View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
 
                   loadApps()
-                  buildInterface()
+                  createScreen()
               }
 
               private fun loadApps() {
                   apps.clear()
+
                   val found = linkedMapOf<String, ResolveInfo>()
 
                   listOf(
                       Intent.CATEGORY_LEANBACK_LAUNCHER,
                       Intent.CATEGORY_LAUNCHER
                   ).forEach { category ->
-                      val intent = Intent(Intent.ACTION_MAIN).addCategory(category)
-                      packageManager.queryIntentActivities(intent, 0).forEach {
-                          if (it.activityInfo.packageName != packageName) {
-                              found[it.activityInfo.packageName] = it
+                      val intent = Intent(Intent.ACTION_MAIN)
+                          .addCategory(category)
+
+                      packageManager.queryIntentActivities(intent, 0)
+                          .forEach {
+                              val pkg = it.activityInfo.packageName
+                              if (pkg != packageName) found[pkg] = it
                           }
-                      }
                   }
 
                   found.values
-                      .sortedBy { it.loadLabel(packageManager).toString().lowercase() }
+                      .sortedBy {
+                          it.loadLabel(packageManager)
+                              .toString().lowercase()
+                      }
                       .forEach {
                           apps.add(
                               AppEntry(
@@ -255,218 +292,167 @@ jobs:
                       }
               }
 
-              private fun buildInterface() {
+              private fun createScreen() {
                   root = FrameLayout(this)
 
-                  backdrop = View(this).apply {
-                      background = gradient(
-                          intArrayOf(
-                              Color.rgb(19, 43, 91),
-                              Color.rgb(8, 17, 39),
-                              dark
-                          )
-                      )
+                  background = View(this).apply {
+                      background = bg(palette(0))
                   }
-                  root.addView(backdrop, FrameLayout.LayoutParams(-1, -1))
 
-                  val glow = View(this).apply {
-                      background = gradient(
+                  root.addView(
+                      background,
+                      FrameLayout.LayoutParams(-1, -1)
+                  )
+
+                  val shade = View(this).apply {
+                      background = bg(
                           intArrayOf(
-                              Color.argb(80, 48, 105, 255),
-                              Color.argb(25, 25, 55, 120),
-                              Color.TRANSPARENT
+                              Color.argb(20, 0, 0, 0),
+                              Color.argb(100, 0, 0, 0),
+                              Color.argb(225, 0, 0, 0)
                           )
                       )
                   }
-                  root.addView(glow, FrameLayout.LayoutParams(-1, -1))
+
+                  root.addView(
+                      shade,
+                      FrameLayout.LayoutParams(-1, -1)
+                  )
 
                   val page = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
-                      setPadding(dp(58), dp(20), dp(58), dp(18))
+                      setPadding(
+                          dp(64), dp(20),
+                          dp(64), dp(18)
+                      )
                   }
-                  root.addView(page, FrameLayout.LayoutParams(-1, -1))
 
-                  buildTopBar(page)
-                  buildHero(page)
-                  buildSectionBar(page)
-                  buildGameRail(page)
-                  buildBottomBar(page)
+                  root.addView(
+                      page,
+                      FrameLayout.LayoutParams(-1, -1)
+                  )
+
+                  createTopBar(page)
+                  createGameRail(page)
+                  createHero(page)
+                  createFooter(page)
 
                   setContentView(root)
-                  refreshRail()
-
-                  rail.post {
-                      if (rail.childCount > 0) rail.getChildAt(0).requestFocus()
-                  }
+                  refresh()
               }
 
-              private fun buildTopBar(parent: LinearLayout) {
+              private fun createTopBar(parent: LinearLayout) {
                   val bar = LinearLayout(this).apply {
                       orientation = LinearLayout.HORIZONTAL
                       gravity = Gravity.CENTER_VERTICAL
                   }
 
-                  val brand = text("AMETHYST", 22f, white, true)
-                  bar.addView(brand, LinearLayout.LayoutParams(0, dp(52), 1f))
-
-                  val tabs = listOf("ИГРЫ", "МЕДИА")
-                  tabs.forEachIndexed { index, name ->
-                      val tab = text(name, 13f, muted, true).apply {
-                          gravity = Gravity.CENTER
-                          setPadding(dp(22), 0, dp(22), 0)
-                          isFocusable = true
-                          setOnFocusChangeListener { view, focused ->
-                              (view as TextView).setTextColor(
-                                  if (focused) white else muted
-                              )
-                          }
-                          setOnClickListener {
-                              mediaMode = index == 1
-                              libraryMode = false
-                              refreshRail()
-                          }
-                      }
-                      bar.addView(tab, LinearLayout.LayoutParams(-2, dp(48)))
-                  }
-
-                  val profile = text("◉", 23f, white, true).apply {
-                      gravity = Gravity.CENTER
-                      isFocusable = true
-                      setPadding(dp(20), 0, dp(20), 0)
-                      setOnClickListener {
-                          startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
-                      }
-                  }
-                  bar.addView(profile, LinearLayout.LayoutParams(dp(58), dp(48)))
-
-                  clock = text(
-                      SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()),
-                      16f,
+                  val brand = label(
+                      "AMETHYST",
+                      22f,
                       white,
                       true
-                  ).apply { gravity = Gravity.CENTER }
-                  bar.addView(clock, LinearLayout.LayoutParams(dp(65), dp(48)))
+                  )
+
+                  bar.addView(
+                      brand,
+                      LinearLayout.LayoutParams(0, dp(58), 1f)
+                  )
+
+                  val games = makeTab("ИГРЫ") {
+                      mediaMode = false
+                      libraryMode = false
+                      refresh()
+                  }
+
+                  val media = makeTab("МЕДИА") {
+                      mediaMode = true
+                      libraryMode = false
+                      refresh()
+                  }
+
+                  bar.addView(games)
+                  bar.addView(media)
+
+                  val profile = label("◉", 24f, white, true).apply {
+                      gravity = Gravity.CENTER
+                      isFocusable = true
+                      setPadding(dp(22), 0, dp(22), 0)
+                      setOnClickListener {
+                          startActivity(
+                              Intent(android.provider.Settings.ACTION_SETTINGS)
+                          )
+                      }
+                  }
+
+                  bar.addView(
+                      profile,
+                      LinearLayout.LayoutParams(dp(58), dp(52))
+                  )
+
+                  clock = label("00:00", 16f, white, true).apply {
+                      gravity = Gravity.CENTER
+                  }
+
+                  bar.addView(
+                      clock,
+                      LinearLayout.LayoutParams(dp(70), dp(52))
+                  )
 
                   parent.addView(bar)
               }
 
-              private fun buildHero(parent: LinearLayout) {
-                  val hero = FrameLayout(this).apply {
-                      background = gradient(
-                          intArrayOf(
-                              Color.rgb(38, 75, 151),
-                              Color.rgb(20, 43, 91),
-                              Color.rgb(10, 21, 47)
-                          ),
-                          24
-                      )
-                  }
+              private fun makeTab(
+                  name: String,
+                  action: () -> Unit
+              ): TextView {
+                  return label(name, 13f, muted, true).apply {
+                      gravity = Gravity.CENTER
+                      isFocusable = true
+                      setPadding(dp(22), 0, dp(22), 0)
 
-                  val content = LinearLayout(this).apply {
-                      orientation = LinearLayout.VERTICAL
-                      gravity = Gravity.CENTER_VERTICAL
-                      setPadding(dp(34), dp(18), dp(20), dp(18))
-                  }
-
-                  content.addView(
-                      text("ИГРАЙ. ОТКРЫВАЙ. ИССЛЕДУЙ.", 11f,
-                          Color.rgb(181, 207, 255), true)
-                  )
-
-                  heroTitle = text("Добро пожаловать", 34f, white, true)
-                  content.addView(
-                      heroTitle,
-                      LinearLayout.LayoutParams(-1, dp(58))
-                  )
-
-                  heroSubtitle = text(
-                      "Твоя игровая библиотека начинается здесь",
-                      15f,
-                      muted
-                  )
-                  content.addView(heroSubtitle)
-
-                  hero.addView(
-                      content,
-                      FrameLayout.LayoutParams(
-                          dp(650),
-                          -1,
-                          Gravity.START or Gravity.CENTER_VERTICAL
-                      )
-                  )
-
-                  heroIcon = ImageView(this).apply {
-                      scaleType = ImageView.ScaleType.FIT_CENTER
-                      setPadding(dp(10), dp(10), dp(10), dp(10))
-                  }
-
-                  hero.addView(
-                      heroIcon,
-                      FrameLayout.LayoutParams(
-                          dp(155),
-                          dp(155),
-                          Gravity.END or Gravity.CENTER_VERTICAL
-                      ).apply {
-                          marginEnd = dp(45)
+                      setOnFocusChangeListener { view, focused ->
+                          (view as TextView).setTextColor(
+                              if (focused) white else muted
+                          )
                       }
-                  )
 
-                  val params = LinearLayout.LayoutParams(-1, dp(205))
-                  params.topMargin = dp(22)
-                  parent.addView(hero, params)
+                      setOnClickListener { action() }
+                  }
               }
 
-              private fun buildSectionBar(parent: LinearLayout) {
-                  val row = LinearLayout(this).apply {
+              private fun createGameRail(parent: LinearLayout) {
+                  val heading = LinearLayout(this).apply {
                       orientation = LinearLayout.HORIZONTAL
                       gravity = Gravity.CENTER_VERTICAL
                   }
 
-                  sectionTitle = text("ВАШИ ИГРЫ", 17f, white, true)
-                  row.addView(
-                      sectionTitle,
-                      LinearLayout.LayoutParams(0, dp(52), 1f)
+                  val section = label(
+                      "ИГРЫ",
+                      13f,
+                      Color.rgb(190, 205, 235),
+                      true
                   )
 
-                  libraryButton = text("ПОЛНАЯ БИБЛИОТЕКА  →", 11f, muted, true).apply {
-                      gravity = Gravity.CENTER
-                      setPadding(dp(18), dp(10), dp(18), dp(10))
-                      background = gradient(
-                          intArrayOf(
-                              Color.argb(45, 255, 255, 255),
-                              Color.argb(25, 255, 255, 255)
-                          ),
-                          18
-                      )
-                      isFocusable = true
-                      setOnFocusChangeListener { view, focused ->
-                          view.background = gradient(
-                              intArrayOf(
-                                  if (focused) blue else Color.argb(45, 255, 255, 255),
-                                  if (focused) Color.rgb(45, 95, 220)
-                                  else Color.argb(25, 255, 255, 255)
-                              ),
-                              18
-                          )
-                      }
-                      setOnClickListener {
-                          libraryMode = !libraryMode
-                          refreshRail()
-                      }
-                  }
-                  row.addView(libraryButton)
+                  heading.addView(
+                      section,
+                      LinearLayout.LayoutParams(0, dp(38), 1f)
+                  )
 
-                  val params = LinearLayout.LayoutParams(-1, dp(52))
-                  params.topMargin = dp(12)
-                  parent.addView(row, params)
-              }
+                  count = label("", 12f, muted)
+                  heading.addView(count)
 
-              private fun buildGameRail(parent: LinearLayout) {
+                  val headingParams =
+                      LinearLayout.LayoutParams(-1, dp(38))
+                  headingParams.topMargin = dp(14)
+                  parent.addView(heading, headingParams)
+
                   railScroll = HorizontalScrollView(this).apply {
                       isHorizontalScrollBarEnabled = false
                       clipToPadding = false
-                      descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
-                      setPadding(dp(5), dp(12), dp(5), dp(15))
+                      descendantFocusability =
+                          ViewGroup.FOCUS_AFTER_DESCENDANTS
+                      setPadding(dp(8), dp(15), dp(30), dp(18))
                   }
 
                   rail = LinearLayout(this).apply {
@@ -478,133 +464,222 @@ jobs:
 
                   parent.addView(
                       railScroll,
-                      LinearLayout.LayoutParams(-1, dp(205))
+                      LinearLayout.LayoutParams(-1, dp(245))
                   )
               }
 
-              private fun buildBottomBar(parent: LinearLayout) {
-                  val bar = LinearLayout(this).apply {
+              private fun createHero(parent: LinearLayout) {
+                  val hero = FrameLayout(this).apply {
+                      clipChildren = false
+                      clipToPadding = false
+                  }
+
+                  val info = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      gravity = Gravity.CENTER_VERTICAL
+                      setPadding(0, dp(5), dp(10), dp(5))
+                  }
+
+                  val eyebrow = label(
+                      "ИГРОВАЯ БИБЛИОТЕКА",
+                      11f,
+                      Color.rgb(170, 198, 255),
+                      true
+                  )
+
+                  info.addView(eyebrow)
+
+                  title = label(
+                      "Добро пожаловать",
+                      36f,
+                      white,
+                      true
+                  ).apply {
+                      maxLines = 1
+                      ellipsize = TextUtils.TruncateAt.END
+                  }
+
+                  val titleParams =
+                      LinearLayout.LayoutParams(-1, dp(60))
+                  titleParams.topMargin = dp(8)
+                  info.addView(title, titleParams)
+
+                  subtitle = label(
+                      "Выберите приложение, чтобы начать",
+                      15f,
+                      muted
+                  ).apply {
+                      maxLines = 1
+                      ellipsize = TextUtils.TruncateAt.END
+                  }
+
+                  info.addView(subtitle)
+
+                  val hint = label(
+                      "✕  ЗАПУСТИТЬ",
+                      12f,
+                      white,
+                      true
+                  ).apply {
+                      background = bg(
+                          intArrayOf(
+                              Color.rgb(55, 111, 238),
+                              Color.rgb(39, 80, 190)
+                          ),
+                          22
+                      )
+                      gravity = Gravity.CENTER
+                      setPadding(
+                          dp(22), dp(12),
+                          dp(22), dp(12)
+                      )
+                  }
+
+                  val hintParams =
+                      LinearLayout.LayoutParams(-2, dp(43))
+                  hintParams.topMargin = dp(20)
+                  info.addView(hint, hintParams)
+
+                  hero.addView(
+                      info,
+                      FrameLayout.LayoutParams(
+                          dp(690),
+                          -1,
+                          Gravity.START or Gravity.CENTER_VERTICAL
+                      )
+                  )
+
+                  heroIcon = ImageView(this).apply {
+                      scaleType = ImageView.ScaleType.FIT_CENTER
+                      alpha = 0.88f
+                  }
+
+                  hero.addView(
+                      heroIcon,
+                      FrameLayout.LayoutParams(
+                          dp(230),
+                          dp(230),
+                          Gravity.END or Gravity.CENTER_VERTICAL
+                      )
+                  )
+
+                  val params =
+                      LinearLayout.LayoutParams(-1, 0, 1f)
+                  params.topMargin = dp(8)
+                  parent.addView(hero, params)
+              }
+
+              private fun createFooter(parent: LinearLayout) {
+                  val footer = LinearLayout(this).apply {
                       orientation = LinearLayout.HORIZONTAL
                       gravity = Gravity.CENTER_VERTICAL
-                      background = gradient(
-                          intArrayOf(
-                              Color.argb(175, 12, 22, 45),
-                              Color.argb(145, 8, 15, 32)
-                          ),
-                          17
-                      )
-                      setPadding(dp(16), dp(5), dp(16), dp(5))
                   }
 
                   val actions = listOf(
-                      "⚙  НАСТРОЙКИ",
-                      "↻  ОБНОВИТЬ",
-                      "⌂  ГЛАВНАЯ"
+                      "○  ВЫБРАТЬ",
+                      "△  НАСТРОЙКИ",
+                      "□  БИБЛИОТЕКА"
                   )
 
                   actions.forEachIndexed { index, value ->
-                      val item = text(value, 11f, muted, true).apply {
+                      val item = label(
+                          value,
+                          11f,
+                          muted,
+                          true
+                      ).apply {
                           gravity = Gravity.CENTER
                           isFocusable = true
-                          setPadding(dp(12), dp(8), dp(12), dp(8))
+                          setPadding(
+                              dp(15), dp(8),
+                              dp(15), dp(8)
+                          )
+
                           setOnFocusChangeListener { view, focused ->
                               (view as TextView).setTextColor(
                                   if (focused) white else muted
                               )
-                              view.background = if (focused) {
-                                  gradient(intArrayOf(blue, Color.rgb(42, 86, 195)), 10)
-                              } else null
                           }
+
                           setOnClickListener {
                               when (index) {
-                                  0 -> startActivity(
-                                      Intent(android.provider.Settings.ACTION_SETTINGS)
-                                  )
-                                  1 -> {
-                                      loadApps()
-                                      refreshRail()
+                                  0 -> {
+                                      if (apps.isNotEmpty()) {
+                                          launch(apps[selected])
+                                      }
                                   }
+                                  1 -> startActivity(
+                                      Intent(
+                                          android.provider.Settings.ACTION_SETTINGS
+                                      )
+                                  )
                                   2 -> {
-                                      libraryMode = false
-                                      mediaMode = false
-                                      refreshRail()
+                                      libraryMode = !libraryMode
+                                      refresh()
                                   }
                               }
                           }
                       }
-                      bar.addView(
-                          item,
-                          LinearLayout.LayoutParams(0, dp(43), 1f)
-                      )
+
+                      footer.addView(item)
                   }
 
-                  val params = LinearLayout.LayoutParams(-1, dp(54))
-                  params.topMargin = dp(2)
-                  parent.addView(bar, params)
+                  val params =
+                      LinearLayout.LayoutParams(-1, dp(45))
+                  params.topMargin = dp(4)
+                  parent.addView(footer, params)
               }
 
-              private fun refreshRail() {
+              private fun refresh() {
                   if (!::rail.isInitialized) return
 
                   rail.removeAllViews()
 
-                  val visibleApps = if (libraryMode) apps else apps.take(12)
-
-                  sectionTitle.text = when {
-                      libraryMode -> "ВСЯ БИБЛИОТЕКА"
-                      mediaMode -> "МЕДИА И ПРИЛОЖЕНИЯ"
-                      else -> "ВАШИ ИГРЫ"
-                  }
-
-                  libraryButton.text = if (libraryMode) {
-                      "НАЗАД  ←"
+                  val visible = if (libraryMode) {
+                      apps
                   } else {
-                      "ПОЛНАЯ БИБЛИОТЕКА  →"
+                      apps.take(12)
                   }
 
-                  if (visibleApps.isEmpty()) {
-                      rail.addView(
-                          text("Приложения не найдены", 16f, muted)
-                      )
+                  count.text = "${apps.size} ПРИЛОЖЕНИЙ"
+
+                  if (visible.isEmpty()) {
+                      title.text = "Приложения не найдены"
+                      subtitle.text = "Установленные приложения появятся здесь"
                       return
                   }
 
-                  visibleApps.forEach { addAppTile(it) }
+                  if (selected >= visible.size) selected = 0
 
-                  val selected = visibleApps.indexOfFirst {
-                      it.packageName == selectedPackage
+                  visible.forEachIndexed { index, app ->
+                      createTile(app, index)
                   }
 
-                  if (selected >= 0) {
-                      rail.post {
-                          rail.getChildAt(selected)?.requestFocus()
-                      }
+                  rail.post {
+                      rail.getChildAt(selected)?.requestFocus()
                   }
+
+                  updateHero(visible[selected])
               }
 
-              private fun addAppTile(app: AppEntry) {
-                  val tile = LinearLayout(this).apply {
-                      orientation = LinearLayout.VERTICAL
-                      gravity = Gravity.CENTER
+              private fun createTile(
+                  app: AppEntry,
+                  index: Int
+              ) {
+                  val tile = FrameLayout(this).apply {
                       isFocusable = true
                       isClickable = true
-                      setPadding(dp(7), dp(7), dp(7), dp(5))
-                      background = gradient(
-                          intArrayOf(
-                              Color.argb(45, 255, 255, 255),
-                              Color.argb(22, 255, 255, 255)
-                          ),
-                          13
-                      )
+                      clipChildren = false
+                      clipToPadding = false
                   }
 
                   val cover = FrameLayout(this).apply {
-                      background = gradient(
+                      background = bg(
                           intArrayOf(
-                              Color.rgb(39, 57, 91),
-                              Color.rgb(17, 28, 51)
+                              Color.rgb(35, 52, 83),
+                              Color.rgb(12, 20, 38)
                           ),
-                          11
+                          12
                       )
                       clipToOutline = true
                   }
@@ -612,78 +687,105 @@ jobs:
                   val icon = ImageView(this).apply {
                       setImageDrawable(app.icon)
                       scaleType = ImageView.ScaleType.FIT_CENTER
-                      setPadding(dp(20), dp(20), dp(20), dp(20))
+                      setPadding(
+                          dp(22), dp(22),
+                          dp(22), dp(22)
+                      )
                   }
 
-                  cover.addView(icon, FrameLayout.LayoutParams(-1, -1))
-                  tile.addView(
-                      cover,
-                      LinearLayout.LayoutParams(-1, dp(112))
+                  cover.addView(
+                      icon,
+                      FrameLayout.LayoutParams(-1, -1)
                   )
 
-                  val name = text(app.name, 12f, white, true).apply {
+                  tile.addView(
+                      cover,
+                      FrameLayout.LayoutParams(-1, dp(143))
+                  )
+
+                  val name = label(
+                      app.name,
+                      12f,
+                      white,
+                      true
+                  ).apply {
                       gravity = Gravity.CENTER
                       maxLines = 2
                       ellipsize = TextUtils.TruncateAt.END
                       textAlignment = View.TEXT_ALIGNMENT_CENTER
                   }
 
-                  val nameParams = LinearLayout.LayoutParams(-1, dp(45))
-                  nameParams.topMargin = dp(5)
+                  val nameParams = FrameLayout.LayoutParams(
+                      -1,
+                      dp(42),
+                      Gravity.BOTTOM
+                  )
+
                   tile.addView(name, nameParams)
 
                   tile.setOnFocusChangeListener { view, focused ->
                       view.animate()
-                          .scaleX(if (focused) 1.08f else 1f)
-                          .scaleY(if (focused) 1.08f else 1f)
-                          .setDuration(170)
+                          .scaleX(if (focused) 1.12f else 1f)
+                          .scaleY(if (focused) 1.12f else 1f)
+                          .setDuration(180)
                           .start()
 
-                      view.background = gradient(
-                          intArrayOf(
-                              if (focused) Color.argb(125, 65, 125, 255)
-                              else Color.argb(45, 255, 255, 255),
-                              if (focused) Color.argb(75, 45, 95, 220)
-                              else Color.argb(22, 255, 255, 255)
-                          ),
-                          13
+                      cover.background = bg(
+                          if (focused) {
+                              intArrayOf(
+                                  Color.rgb(65, 125, 255),
+                                  Color.rgb(35, 75, 170)
+                              )
+                          } else {
+                              intArrayOf(
+                                  Color.rgb(35, 52, 83),
+                                  Color.rgb(12, 20, 38)
+                              )
+                          },
+                          12
                       )
 
                       if (focused) {
-                          selectedPackage = app.packageName
-                          heroTitle.text = app.name
-                          heroSubtitle.text = app.packageName
-                          heroIcon.setImageDrawable(app.icon)
-
-                          backdrop.background = gradient(
-                              intArrayOf(
-                                  Color.rgb(24, 52, 111),
-                                  Color.rgb(8, 18, 43),
-                                  dark
-                              )
-                          )
-
+                          selected = index
+                          updateHero(app)
                           railScroll.smoothScrollTo(
-                              view.left - dp(30),
+                              maxOf(0, view.left - dp(30)),
                               0
                           )
                       }
                   }
 
                   tile.setOnClickListener {
-                      launchApp(app)
+                      launch(app)
                   }
 
-                  val params = LinearLayout.LayoutParams(dp(170), dp(174))
-                  params.marginEnd = dp(17)
+                  val params = LinearLayout.LayoutParams(
+                      dp(165),
+                      dp(190)
+                  )
+                  params.marginEnd = dp(20)
                   rail.addView(tile, params)
               }
 
-              private fun launchApp(app: AppEntry) {
+              private fun updateHero(app: AppEntry) {
+                  title.text = app.name
+                  subtitle.text = app.packageName
+                  heroIcon.setImageDrawable(app.icon)
+
+                  val index = apps.indexOf(app).coerceAtLeast(0)
+
+                  background.background = bg(
+                      palette(index)
+                  )
+              }
+
+              private fun launch(app: AppEntry) {
                   try {
-                      val intent = packageManager.getLaunchIntentForPackage(
-                          app.packageName
-                      )
+                      val intent =
+                          packageManager.getLaunchIntentForPackage(
+                              app.packageName
+                          )
+
                       if (intent != null) startActivity(intent)
                   } catch (_: Exception) {
                   }
@@ -693,15 +795,19 @@ jobs:
                   keyCode: Int,
                   event: KeyEvent?
               ): Boolean {
-                  if (keyCode == KeyEvent.KEYCODE_BACK && libraryMode) {
-                      libraryMode = false
-                      refreshRail()
-                      return true
+                  if (keyCode == KeyEvent.KEYCODE_BACK) {
+                      if (libraryMode) {
+                          libraryMode = false
+                          refresh()
+                          return true
+                      }
                   }
 
                   if (keyCode == KeyEvent.KEYCODE_MENU) {
                       startActivity(
-                          Intent(android.provider.Settings.ACTION_SETTINGS)
+                          Intent(
+                              android.provider.Settings.ACTION_SETTINGS
+                          )
                       )
                       return true
                   }
@@ -719,5 +825,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Amethyst-PS-Edition-v5
+          name: Amethyst-PS-Edition-v6
           path: amethyst/app/build/outputs/apk/debug/app-debug.apk
