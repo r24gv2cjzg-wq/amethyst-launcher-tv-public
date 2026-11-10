@@ -1,4 +1,4 @@
-name: Amethyst TV OS 7.0
+name: Amethyst TV OS 8.0
 
 on:
   workflow_dispatch:
@@ -38,6 +38,7 @@ jobs:
                   gradlePluginPortal()
               }
           }
+
           dependencyResolutionManagement {
               repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
@@ -45,6 +46,7 @@ jobs:
                   mavenCentral()
               }
           }
+
           rootProject.name = "AmethystTV"
           include(":app")
           EOF
@@ -77,8 +79,8 @@ jobs:
                   applicationId = "com.amethyst.launcher"
                   minSdk = 23
                   targetSdk = 28
-                  versionCode = 7
-                  versionName = "7.0"
+                  versionCode = 8
+                  versionName = "8.0"
               }
 
               compileOptions {
@@ -109,8 +111,8 @@ jobs:
               <application
                   android:theme="@android:style/Theme.Material.NoActionBar"
                   android:label="Amethyst TV OS"
-                  android:usesCleartextTraffic="false"
-                  android:allowBackup="false">
+                  android:allowBackup="false"
+                  android:usesCleartextTraffic="false">
 
                   <activity
                       android:name=".MainActivity"
@@ -143,8 +145,8 @@ jobs:
 
           import android.app.Activity
           import android.os.Bundle
-          import android.content.Intent
           import android.content.Context
+          import android.content.Intent
           import android.graphics.Color
           import android.graphics.Typeface
           import android.graphics.drawable.GradientDrawable
@@ -155,6 +157,7 @@ jobs:
           import android.view.KeyEvent
           import android.view.View
           import android.view.ViewGroup
+          import android.view.animation.DecelerateInterpolator
           import android.widget.FrameLayout
           import android.widget.HorizontalScrollView
           import android.widget.ImageView
@@ -170,24 +173,29 @@ jobs:
 
           class MainActivity : Activity() {
 
+              private val backgroundColor = Color.rgb(5, 8, 17)
+              private val white = Color.WHITE
+              private val muted = Color.rgb(155, 170, 198)
+              private val accent = Color.rgb(75, 145, 255)
+
               private lateinit var root: FrameLayout
-              private lateinit var page: LinearLayout
-              private lateinit var background: View
+              private lateinit var homePage: FrameLayout
+              private lateinit var hdmiPage: FrameLayout
+              private lateinit var heroTitle: TextView
+              private lateinit var heroSubtitle: TextView
               private lateinit var clock: TextView
 
               private val apps = mutableListOf<AppEntry>()
               private val sources = mutableListOf<TvSource>()
 
-              private var currentPage = Screen.HOME
+              private var currentScreen = Screen.HOME
               private var selectedApp = 0
-
-              private val dark = Color.rgb(5, 8, 18)
-              private val white = Color.WHITE
-              private val muted = Color.rgb(160, 174, 202)
-              private val blue = Color.rgb(75, 130, 255)
+              private var pageHeight = 0
+              private var animationRunning = false
+              private var libraryOpen = false
 
               private enum class Screen {
-                  HOME, HDMI, LIBRARY
+                  HOME, HDMI
               }
 
               private data class AppEntry(
@@ -198,56 +206,46 @@ jobs:
 
               private data class TvSource(
                   val name: String,
-                  val subtitle: String,
+                  val description: String,
                   val inputId: String,
-                  val symbol: String
+                  val isPlayStation: Boolean
               )
 
               private fun dp(value: Int): Int =
                   (value * resources.displayMetrics.density).toInt()
 
-              private fun gradient(
+              private fun makeGradient(
                   colors: IntArray,
-                  radius: Int = 0
-              ) = GradientDrawable(
-                  GradientDrawable.Orientation.TL_BR,
-                  colors
-              ).apply {
-                  cornerRadius = dp(radius).toFloat()
+                  radius: Int = 0,
+                  strokeColor: Int = Color.TRANSPARENT,
+                  strokeWidth: Int = 0
+              ): GradientDrawable {
+                  return GradientDrawable(
+                      GradientDrawable.Orientation.TL_BR,
+                      colors
+                  ).apply {
+                      cornerRadius = dp(radius).toFloat()
+
+                      if (strokeWidth > 0) {
+                          setStroke(dp(strokeWidth), strokeColor)
+                      }
+                  }
               }
 
-              private fun text(
+              private fun label(
                   value: String,
                   size: Float,
                   color: Int = white,
                   bold: Boolean = false
-              ) = TextView(this).apply {
-                  text = value
-                  textSize = size
-                  setTextColor(color)
-                  gravity = Gravity.CENTER_VERTICAL
-                  if (bold) setTypeface(null, Typeface.BOLD)
-              }
+              ): TextView {
+                  return TextView(this).apply {
+                      text = value
+                      textSize = size
+                      setTextColor(color)
+                      gravity = Gravity.CENTER_VERTICAL
 
-              private fun focusStyle(
-                  view: View,
-                  radius: Int = 12
-              ) {
-                  view.isFocusable = true
-                  view.isClickable = true
-
-                  view.setOnFocusChangeListener { v, focused ->
-                      v.animate()
-                          .scaleX(if (focused) 1.045f else 1f)
-                          .scaleY(if (focused) 1.045f else 1f)
-                          .alpha(if (focused) 1f else 0.88f)
-                          .setDuration(150)
-                          .start()
-
-                      if (v is TextView) {
-                          v.setTextColor(
-                              if (focused) white else muted
-                          )
+                      if (bold) {
+                          setTypeface(null, Typeface.BOLD)
                       }
                   }
               }
@@ -255,8 +253,8 @@ jobs:
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
 
-                  window.statusBarColor = dark
-                  window.navigationBarColor = dark
+                  window.statusBarColor = backgroundColor
+                  window.navigationBarColor = backgroundColor
 
                   window.decorView.systemUiVisibility =
                       View.SYSTEM_UI_FLAG_FULLSCREEN or
@@ -265,13 +263,14 @@ jobs:
 
                   loadApps()
                   loadSources()
-                  showScreen(Screen.HOME)
+                  createInterface()
               }
 
               private fun loadApps() {
                   apps.clear()
 
-                  val found = linkedMapOf<String, ResolveInfo>()
+                  val discovered =
+                      linkedMapOf<String, ResolveInfo>()
 
                   val categories = listOf(
                       Intent.CATEGORY_LEANBACK_LAUNCHER,
@@ -285,15 +284,16 @@ jobs:
                       packageManager
                           .queryIntentActivities(query, 0)
                           .forEach { info ->
-                              val pkg = info.activityInfo.packageName
+                              val packageName =
+                                  info.activityInfo.packageName
 
-                              if (pkg != packageName) {
-                                  found[pkg] = info
+                              if (packageName != packageNameOfSelf()) {
+                                  discovered[packageName] = info
                               }
                           }
                   }
 
-                  found.values
+                  discovered.values
                       .sortedBy {
                           it.loadLabel(packageManager)
                               .toString()
@@ -310,6 +310,9 @@ jobs:
                       }
               }
 
+              private fun packageNameOfSelf(): String =
+                  "com.amethyst.launcher"
+
               private fun loadSources() {
                   sources.clear()
 
@@ -320,7 +323,7 @@ jobs:
 
                       val inputs = manager.tvInputList
 
-                      val physical = inputs
+                      val hdmiInputs = inputs
                           .filter {
                               it.type == TvInputInfo.TYPE_HDMI &&
                               !it.id.contains("HDMI300004")
@@ -334,260 +337,195 @@ jobs:
                                   ?: 99
                           }
 
-                      val cec = inputs.firstOrNull {
+                      val cecDevice = inputs.firstOrNull {
                           it.id.contains("HDMI300004")
                       }
 
-                      physical.forEachIndexed { index, info ->
+                      hdmiInputs.forEachIndexed { index, info ->
                           val port = index + 1
 
-                          // FIX: loadLabel() requires Context, not PackageManager.
-                          val label = info.loadLabel(this)
-                              .toString()
-
-                          val ps5 = port == 3 &&
-                              cec != null &&
-                              cec.loadLabel(this)
+                          val isPlayStation =
+                              port == 3 &&
+                              cecDevice != null &&
+                              cecDevice.loadLabel(this)
                                   .toString()
                                   .contains("PlayStation", true)
 
                           sources.add(
                               TvSource(
-                                  name = if (ps5) {
+                                  name = if (isPlayStation) {
                                       "PlayStation 5"
                                   } else {
                                       "HDMI $port"
                                   },
-                                  subtitle = if (ps5) {
-                                      "HDMI 3  •  ОБНАРУЖЕНО ПО HDMI-CEC"
+                                  description = if (isPlayStation) {
+                                      "ИГРОВАЯ КОНСОЛЬ  •  HDMI 3"
                                   } else {
-                                      label.uppercase(Locale.getDefault())
+                                      "ВХОД HDMI  •  ПОРТ $port"
                                   },
                                   inputId = info.id,
-                                  symbol = if (ps5) "PS5" else "HDMI"
+                                  isPlayStation = isPlayStation
                               )
                           )
                       }
                   } catch (_: Exception) {
                       sources.clear()
                   }
-
-                  if (sources.isEmpty()) {
-                      Toast.makeText(
-                          this,
-                          "Не удалось получить список HDMI-входов",
-                          Toast.LENGTH_LONG
-                      ).show()
-                  }
               }
 
-              private fun showScreen(screen: Screen) {
-                  currentPage = screen
-
-                  root = FrameLayout(this)
-
-                  background = View(this).apply {
-                      this.background = gradient(
-                          intArrayOf(
-                              Color.rgb(20, 48, 105),
-                              Color.rgb(10, 18, 43),
-                              dark
-                          )
-                      )
+              private fun createInterface() {
+                  root = FrameLayout(this).apply {
+                      setBackgroundColor(backgroundColor)
+                      clipChildren = false
+                      clipToPadding = false
                   }
 
+                  homePage = FrameLayout(this)
+                  hdmiPage = FrameLayout(this)
+
                   root.addView(
-                      background,
+                      homePage,
                       FrameLayout.LayoutParams(-1, -1)
                   )
 
-                  val shade = View(this).apply {
-                      this.background = gradient(
-                          intArrayOf(
-                              Color.argb(20, 0, 0, 0),
-                              Color.argb(95, 0, 0, 0),
-                              Color.argb(220, 0, 0, 0)
-                          )
-                      )
-                  }
-
                   root.addView(
-                      shade,
+                      hdmiPage,
                       FrameLayout.LayoutParams(-1, -1)
                   )
 
-                  page = LinearLayout(this).apply {
-                      orientation = LinearLayout.VERTICAL
-                      setPadding(
-                          dp(66), dp(22),
-                          dp(66), dp(20)
-                      )
-                  }
-
-                  root.addView(
-                      page,
-                      FrameLayout.LayoutParams(-1, -1)
-                  )
-
-                  createHeader()
-
-                  when (screen) {
-                      Screen.HOME -> createHome()
-                      Screen.HDMI -> createHdmi()
-                      Screen.LIBRARY -> createLibrary()
-                  }
-
-                  createDock()
+                  buildHome()
+                  buildHdmi()
 
                   setContentView(root)
 
-                  page.post {
-                      when (screen) {
-                          Screen.HOME -> {
-                              page.findViewWithTag<View>("first_app")
-                                  ?.requestFocus()
-                                  ?: page.findViewWithTag<View>("dock_hdmi")
-                                      ?.requestFocus()
-                          }
+                  root.post {
+                      pageHeight = root.height
 
-                          Screen.HDMI -> {
-                              page.findViewWithTag<View>("first_source")
-                                  ?.requestFocus()
-                                  ?: page.findViewWithTag<View>("dock_home")
-                                      ?.requestFocus()
-                          }
+                      homePage.translationY = 0f
+                      hdmiPage.translationY = pageHeight.toFloat()
 
-                          Screen.LIBRARY -> {
-                              page.findViewWithTag<View>("first_library")
-                                  ?.requestFocus()
-                                  ?: page.findViewWithTag<View>("dock_home")
-                                      ?.requestFocus()
-                          }
-                      }
+                      homePage.requestFocus()
                   }
               }
 
-              private fun createHeader() {
-                  val header = LinearLayout(this).apply {
-                      orientation = LinearLayout.HORIZONTAL
-                      gravity = Gravity.CENTER_VERTICAL
+              private fun pageBackground(): View {
+                  return View(this).apply {
+                      background = makeGradient(
+                          intArrayOf(
+                              Color.rgb(23, 48, 93),
+                              Color.rgb(12, 23, 47),
+                              Color.rgb(5, 8, 17)
+                          )
+                      )
                   }
-
-                  val brand = text(
-                      "AMETHYST",
-                      22f,
-                      white,
-                      true
-                  )
-
-                  header.addView(
-                      brand,
-                      LinearLayout.LayoutParams(0, dp(52), 1f)
-                  )
-
-                  val status = text(
-                      "TV OS 7.0",
-                      11f,
-                      muted,
-                      true
-                  )
-
-                  header.addView(
-                      status,
-                      LinearLayout.LayoutParams(-2, dp(52))
-                  )
-
-                  clock = text(
-                      SimpleDateFormat(
-                          "HH:mm",
-                          Locale.getDefault()
-                      ).format(Date()),
-                      16f,
-                      white,
-                      true
-                  ).apply {
-                      gravity = Gravity.CENTER
-                  }
-
-                  val clockParams =
-                      LinearLayout.LayoutParams(dp(75), dp(52))
-                  clockParams.marginStart = dp(25)
-
-                  header.addView(clock, clockParams)
-
-                  page.addView(header)
               }
 
-              private fun createHome() {
-                  val intro = LinearLayout(this).apply {
+              private fun buildHome() {
+                  homePage.addView(
+                      pageBackground(),
+                      FrameLayout.LayoutParams(-1, -1)
+                  )
+
+                  val glow = View(this).apply {
+                      background = makeGradient(
+                          intArrayOf(
+                              Color.argb(65, 35, 100, 220),
+                              Color.argb(0, 35, 100, 220)
+                          )
+                      )
+                  }
+
+                  homePage.addView(
+                      glow,
+                      FrameLayout.LayoutParams(-1, -1)
+                  )
+
+                  val content = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(
+                          dp(68), dp(28),
+                          dp(68), dp(28)
+                      )
+                  }
+
+                  homePage.addView(
+                      content,
+                      FrameLayout.LayoutParams(-1, -1)
+                  )
+
+                  buildHeader(content, false)
+
+                  val hero = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
                       gravity = Gravity.CENTER_VERTICAL
                   }
 
-                  val eyebrow = text(
-                      "ТВОЁ ПРОСТРАНСТВО",
+                  val eyebrow = label(
+                      "AMETHYST  /  HOME",
                       11f,
-                      Color.rgb(164, 195, 255),
+                      Color.rgb(151, 190, 255),
                       true
                   )
 
-                  intro.addView(eyebrow)
+                  hero.addView(eyebrow)
 
-                  val heading = text(
-                      "Игры и развлечения",
-                      34f,
+                  heroTitle = label(
+                      "ТВОИ ИГРЫ",
+                      38f,
                       white,
                       true
                   )
 
-                  val headingParams =
-                      LinearLayout.LayoutParams(-1, dp(55))
-                  headingParams.topMargin = dp(5)
+                  hero.addView(
+                      heroTitle,
+                      LinearLayout.LayoutParams(-1, dp(62))
+                  )
 
-                  intro.addView(heading, headingParams)
-
-                  val description = text(
-                      "Всё установленное — в одном месте",
-                      14f,
+                  heroSubtitle = label(
+                      "Выбери приложение, чтобы продолжить",
+                      15f,
                       muted
                   )
 
-                  intro.addView(description)
+                  hero.addView(heroSubtitle)
 
-                  val introParams =
-                      LinearLayout.LayoutParams(-1, dp(115))
-                  introParams.topMargin = dp(20)
+                  val heroParams =
+                      LinearLayout.LayoutParams(-1, dp(150))
+                  heroParams.topMargin = dp(24)
 
-                  page.addView(intro, introParams)
+                  content.addView(hero, heroParams)
 
-                  val section = LinearLayout(this).apply {
+                  val railHeader = LinearLayout(this).apply {
                       orientation = LinearLayout.HORIZONTAL
                       gravity = Gravity.CENTER_VERTICAL
                   }
 
-                  val sectionTitle = text(
-                      "ТВОИ ПРИЛОЖЕНИЯ",
-                      12f,
-                      muted,
-                      true
+                  railHeader.addView(
+                      label(
+                          "УСТАНОВЛЕННЫЕ ПРИЛОЖЕНИЯ",
+                          12f,
+                          muted,
+                          true
+                      ),
+                      LinearLayout.LayoutParams(0, dp(38), 1f)
                   )
 
-                  section.addView(
-                      sectionTitle,
-                      LinearLayout.LayoutParams(0, dp(36), 1f)
+                  railHeader.addView(
+                      label(
+                          "${apps.size} ПРИЛОЖЕНИЙ",
+                          10f,
+                          muted,
+                          true
+                      )
                   )
 
-                  section.addView(
-                      text("${apps.size} ПРИЛОЖЕНИЙ", 10f, muted, true)
-                  )
-
-                  page.addView(section)
+                  content.addView(railHeader)
 
                   val scroll = HorizontalScrollView(this).apply {
                       isHorizontalScrollBarEnabled = false
                       clipChildren = false
                       clipToPadding = false
-                      setPadding(dp(8), dp(15), dp(30), dp(20))
+                      setPadding(dp(8), dp(18), dp(40), dp(24))
                   }
 
                   val rail = LinearLayout(this).apply {
@@ -595,71 +533,147 @@ jobs:
                       gravity = Gravity.CENTER_VERTICAL
                   }
 
-                  apps.take(14).forEachIndexed { index, app ->
+                  apps.take(16).forEachIndexed { index, app ->
+                      val tile = createAppTile(app, index)
+
                       rail.addView(
-                          createAppTile(app, index, false),
+                          tile,
                           LinearLayout.LayoutParams(
-                              dp(166),
-                              dp(188)
+                              dp(178),
+                              dp(194)
                           ).apply {
-                              marginEnd = dp(19)
+                              marginEnd = dp(20)
                           }
                       )
                   }
 
                   scroll.addView(rail)
 
-                  val scrollParams =
-                      LinearLayout.LayoutParams(-1, dp(225))
-                  page.addView(scroll, scrollParams)
+                  content.addView(
+                      scroll,
+                      LinearLayout.LayoutParams(-1, dp(235))
+                  )
 
                   if (apps.isEmpty()) {
-                      val empty = text(
-                          "Приложения не найдены",
-                          16f,
-                          muted
+                      content.addView(
+                          label(
+                              "Не удалось обнаружить приложения",
+                              15f,
+                              muted
+                          )
                       )
-                      page.addView(empty)
                   }
 
-                  val hint = text(
-                      "↓  ИСТОЧНИКИ HDMI     •     БИБЛИОТЕКА",
+                  val footer = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                  }
+
+                  footer.addView(
+                      label(
+                          "↓  ИСТОЧНИКИ HDMI",
+                          12f,
+                          Color.rgb(190, 210, 245),
+                          true
+                      ),
+                      LinearLayout.LayoutParams(0, dp(48), 1f)
+                  )
+
+                  val library = label(
+                      "БИБЛИОТЕКА  →",
                       11f,
-                      Color.rgb(180, 198, 231),
+                      muted,
+                      true
+                  ).apply {
+                      isFocusable = true
+                      setOnClickListener {
+                          openLibrary()
+                      }
+                  }
+
+                  footer.addView(library)
+
+                  content.addView(
+                      footer,
+                      LinearLayout.LayoutParams(-1, dp(48))
+                  )
+              }
+
+              private fun buildHeader(
+                  parent: LinearLayout,
+                  hdmi: Boolean
+              ) {
+                  val header = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                  }
+
+                  val brand = label(
+                      "AMETHYST",
+                      21f,
+                      white,
                       true
                   )
 
-                  val hintParams =
-                      LinearLayout.LayoutParams(-1, dp(40))
-                  hintParams.topMargin = dp(4)
-                  page.addView(hint, hintParams)
+                  header.addView(
+                      brand,
+                      LinearLayout.LayoutParams(0, dp(48), 1f)
+                  )
+
+                  header.addView(
+                      label(
+                          if (hdmi) "INPUT SELECT" else "GAMES",
+                          10f,
+                          muted,
+                          true
+                      )
+                  )
+
+                  val time = SimpleDateFormat(
+                      "HH:mm",
+                      Locale.getDefault()
+                  ).format(Date())
+
+                  clock = label(
+                      time,
+                      17f,
+                      white,
+                      true
+                  ).apply {
+                      gravity = Gravity.CENTER
+                  }
+
+                  val timeParams =
+                      LinearLayout.LayoutParams(dp(75), dp(48))
+                  timeParams.marginStart = dp(25)
+
+                  header.addView(clock, timeParams)
+
+                  parent.addView(header)
               }
 
               private fun createAppTile(
                   app: AppEntry,
-                  index: Int,
-                  library: Boolean
+                  index: Int
               ): View {
-                  val tile = LinearLayout(this).apply {
-                      orientation = LinearLayout.VERTICAL
-                      gravity = Gravity.CENTER
-                      setPadding(dp(10), dp(10), dp(10), dp(8))
-                      background = gradient(
+                  val tile = FrameLayout(this).apply {
+                      isFocusable = true
+                      isClickable = true
+                      clipChildren = false
+                      clipToPadding = false
+                      background = makeGradient(
                           intArrayOf(
-                              Color.rgb(27, 42, 70),
-                              Color.rgb(12, 19, 36)
+                              Color.rgb(31, 48, 78),
+                              Color.rgb(13, 22, 42)
                           ),
-                          13
+                          10
                       )
                   }
 
-                  focusStyle(tile)
-                  tile.tag = if (library && index == 0) {
-                      "first_library"
-                  } else if (!library && index == 0) {
-                      "first_app"
-                  } else {
-                      "app_$index"
+                  val inner = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      gravity = Gravity.CENTER
+                      setPadding(dp(12), dp(12), dp(12), dp(12))
                   }
 
                   val icon = ImageView(this).apply {
@@ -667,17 +681,14 @@ jobs:
                       scaleType = ImageView.ScaleType.FIT_CENTER
                   }
 
-                  tile.addView(
+                  inner.addView(
                       icon,
-                      LinearLayout.LayoutParams(
-                          dp(82),
-                          dp(82)
-                      )
+                      LinearLayout.LayoutParams(dp(82), dp(82))
                   )
 
-                  val name = text(
+                  val name = label(
                       app.name,
-                      12f,
+                      13f,
                       white,
                       true
                   ).apply {
@@ -688,100 +699,177 @@ jobs:
                   }
 
                   val nameParams =
-                      LinearLayout.LayoutParams(-1, dp(48))
-                  nameParams.topMargin = dp(10)
+                      LinearLayout.LayoutParams(-1, dp(52))
+                  nameParams.topMargin = dp(12)
 
-                  tile.addView(name, nameParams)
+                  inner.addView(name, nameParams)
+
+                  tile.addView(
+                      inner,
+                      FrameLayout.LayoutParams(-1, -1)
+                  )
 
                   tile.setOnFocusChangeListener { view, focused ->
                       view.animate()
-                          .scaleX(if (focused) 1.07f else 1f)
-                          .scaleY(if (focused) 1.07f else 1f)
-                          .setDuration(150)
+                          .scaleX(if (focused) 1.09f else 1f)
+                          .scaleY(if (focused) 1.09f else 1f)
+                          .translationY(if (focused) -dp(5).toFloat() else 0f)
+                          .setDuration(170)
+                          .setInterpolator(DecelerateInterpolator())
                           .start()
 
-                      view.background = gradient(
-                          if (focused) {
+                      view.background = if (focused) {
+                          makeGradient(
                               intArrayOf(
-                                  Color.rgb(53, 102, 190),
-                                  Color.rgb(22, 43, 89)
-                              )
-                          } else {
+                                  Color.rgb(42, 92, 173),
+                                  Color.rgb(15, 38, 82)
+                              ),
+                              10,
+                              Color.rgb(112, 177, 255),
+                              2
+                          )
+                      } else {
+                          makeGradient(
                               intArrayOf(
-                                  Color.rgb(27, 42, 70),
-                                  Color.rgb(12, 19, 36)
-                              )
-                          },
-                          13
-                      )
+                                  Color.rgb(31, 48, 78),
+                                  Color.rgb(13, 22, 42)
+                              ),
+                              10
+                          )
+                      }
+
+                      if (focused) {
+                          selectedApp = index
+                          heroTitle.text = app.name
+                          heroSubtitle.text = app.packageName
+                      }
                   }
 
                   tile.setOnClickListener {
                       launchApp(app)
                   }
 
+                  tile.setOnKeyListener { _, keyCode, event ->
+                      if (
+                          keyCode == KeyEvent.KEYCODE_DPAD_DOWN &&
+                          event.action == KeyEvent.ACTION_DOWN
+                      ) {
+                          slideToHdmi()
+                          true
+                      } else {
+                          false
+                      }
+                  }
+
                   return tile
               }
 
-              private fun createHdmi() {
-                  val heading = text(
-                      "Источники сигнала",
-                      34f,
+              private fun buildHdmi() {
+                  hdmiPage.addView(
+                      View(this).apply {
+                          background = makeGradient(
+                              intArrayOf(
+                                  Color.rgb(8, 18, 39),
+                                  Color.rgb(5, 8, 17),
+                                  Color.rgb(3, 5, 12)
+                              )
+                          )
+                      },
+                      FrameLayout.LayoutParams(-1, -1)
+                  )
+
+                  val glow = View(this).apply {
+                      background = makeGradient(
+                          intArrayOf(
+                              Color.argb(65, 20, 85, 190),
+                              Color.argb(0, 20, 85, 190)
+                          )
+                      )
+                  }
+
+                  hdmiPage.addView(
+                      glow,
+                      FrameLayout.LayoutParams(-1, -1)
+                  )
+
+                  val content = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(
+                          dp(68), dp(28),
+                          dp(68), dp(28)
+                      )
+                  }
+
+                  hdmiPage.addView(
+                      content,
+                      FrameLayout.LayoutParams(-1, -1)
+                  )
+
+                  buildHeader(content, true)
+
+                  val title = label(
+                      "Выбор источника",
+                      37f,
                       white,
                       true
                   )
 
-                  val headingParams =
+                  val titleParams =
                       LinearLayout.LayoutParams(-1, dp(65))
-                  headingParams.topMargin = dp(25)
+                  titleParams.topMargin = dp(35)
 
-                  page.addView(heading, headingParams)
+                  content.addView(title, titleParams)
 
-                  page.addView(
-                      text(
+                  content.addView(
+                      label(
                           "Выбери устройство, подключённое к телевизору",
-                          14f,
+                          15f,
                           muted
                       )
                   )
 
-                  val list = LinearLayout(this).apply {
+                  val rail = LinearLayout(this).apply {
                       orientation = LinearLayout.HORIZONTAL
                       gravity = Gravity.CENTER_VERTICAL
                   }
 
                   sources.forEachIndexed { index, source ->
-                      val card = createSourceTile(source, index)
-
-                      val params =
-                          LinearLayout.LayoutParams(0, dp(205), 1f)
-                      params.marginEnd = dp(18)
-
-                      list.addView(card, params)
+                      rail.addView(
+                          createSourceTile(source, index),
+                          LinearLayout.LayoutParams(
+                              0,
+                              dp(215),
+                              1f
+                          ).apply {
+                              marginEnd = dp(20)
+                          }
+                      )
                   }
 
-                  val listParams =
-                      LinearLayout.LayoutParams(-1, dp(230))
-                  listParams.topMargin = dp(32)
+                  val railParams =
+                      LinearLayout.LayoutParams(-1, dp(245))
+                  railParams.topMargin = dp(34)
 
-                  page.addView(list, listParams)
+                  content.addView(rail, railParams)
 
                   if (sources.isEmpty()) {
-                      page.addView(
-                          text(
-                              "Телевизор не предоставил список HDMI-входов",
-                              15f,
+                      content.addView(
+                          label(
+                              "HDMI-входы не обнаружены",
+                              16f,
                               muted
                           )
                       )
                   }
 
-                  page.addView(
-                      text(
-                          "Нажми ✕, чтобы открыть выбранный источник",
-                          12f,
-                          muted
-                      )
+                  content.addView(
+                      label(
+                          "↑  ВЕРНУТЬСЯ К ГЛАВНОМУ ЭКРАНУ",
+                          11f,
+                          Color.rgb(190, 210, 245),
+                          true
+                      ),
+                      LinearLayout.LayoutParams(-1, dp(55))
                   )
               }
 
@@ -789,40 +877,42 @@ jobs:
                   source: TvSource,
                   index: Int
               ): View {
-                  val card = LinearLayout(this).apply {
+                  val tile = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
                       gravity = Gravity.CENTER
-                      setPadding(dp(18), dp(15), dp(18), dp(15))
-                      background = gradient(
+                      isFocusable = true
+                      isClickable = true
+                      setPadding(
+                          dp(16), dp(15),
+                          dp(16), dp(15)
+                      )
+
+                      background = makeGradient(
                           intArrayOf(
-                              Color.rgb(28, 42, 68),
-                              Color.rgb(12, 19, 36)
+                              Color.rgb(25, 40, 66),
+                              Color.rgb(10, 17, 33)
                           ),
-                          15
+                          8
                       )
                   }
 
-                  focusStyle(card)
-
-                  if (index == 0) card.tag = "first_source"
-
-                  val symbol = text(
-                      source.symbol,
-                      if (source.symbol == "PS5") 31f else 25f,
+                  val symbol = label(
+                      if (source.isPlayStation) "PS5" else "HDMI",
+                      if (source.isPlayStation) 34f else 27f,
                       white,
                       true
                   ).apply {
                       gravity = Gravity.CENTER
                   }
 
-                  card.addView(
+                  tile.addView(
                       symbol,
-                      LinearLayout.LayoutParams(-1, dp(75))
+                      LinearLayout.LayoutParams(-1, dp(80))
                   )
 
-                  val name = text(
+                  val name = label(
                       source.name,
-                      19f,
+                      20f,
                       white,
                       true
                   ).apply {
@@ -831,258 +921,167 @@ jobs:
                       maxLines = 2
                   }
 
-                  card.addView(
+                  tile.addView(
                       name,
                       LinearLayout.LayoutParams(-1, dp(55))
                   )
 
-                  val subtitle = text(
-                      source.subtitle,
+                  val description = label(
+                      source.description,
                       9f,
                       muted,
                       true
                   ).apply {
                       gravity = Gravity.CENTER
                       textAlignment = View.TEXT_ALIGNMENT_CENTER
-                      maxLines = 2
                   }
 
-                  card.addView(subtitle)
+                  tile.addView(description)
 
-                  card.setOnFocusChangeListener { view, focused ->
+                  tile.setOnFocusChangeListener { view, focused ->
                       view.animate()
-                          .scaleX(if (focused) 1.055f else 1f)
-                          .scaleY(if (focused) 1.055f else 1f)
-                          .setDuration(150)
+                          .scaleX(if (focused) 1.075f else 1f)
+                          .scaleY(if (focused) 1.075f else 1f)
+                          .setDuration(170)
+                          .setInterpolator(DecelerateInterpolator())
                           .start()
 
-                      view.background = gradient(
-                          if (focused) {
+                      view.background = if (focused) {
+                          makeGradient(
                               intArrayOf(
-                                  Color.rgb(49, 102, 194),
-                                  Color.rgb(19, 44, 99)
-                              )
-                          } else {
+                                  Color.rgb(48, 100, 185),
+                                  Color.rgb(17, 39, 82)
+                              ),
+                              8,
+                              Color.rgb(120, 185, 255),
+                              3
+                          )
+                      } else {
+                          makeGradient(
                               intArrayOf(
-                                  Color.rgb(28, 42, 68),
-                                  Color.rgb(12, 19, 36)
-                              )
-                          },
-                          15
-                      )
+                                  Color.rgb(25, 40, 66),
+                                  Color.rgb(10, 17, 33)
+                              ),
+                              8
+                          )
+                      }
                   }
 
-                  card.setOnClickListener {
+                  tile.setOnClickListener {
                       switchInput(source)
                   }
 
-                  return card
-              }
-
-              private fun switchInput(source: TvSource) {
-                  try {
-                      val uri =
-                          TvContract.buildChannelUriForPassthroughInput(
-                              source.inputId
-                          )
-
-                      val intent = Intent(
-                          Intent.ACTION_VIEW,
-                          uri
-                      ).apply {
-                          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                      }
-
-                      startActivity(intent)
-                  } catch (_: Exception) {
-                      Toast.makeText(
-                          this,
-                          "Прошивка не разрешила переключить вход напрямую",
-                          Toast.LENGTH_LONG
-                      ).show()
-
-                      try {
-                          startActivity(
-                              Intent(
-                                  android.provider.Settings.ACTION_SETTINGS
-                              )
-                          )
-                      } catch (_: Exception) {
-                      }
-                  }
-              }
-
-              private fun createLibrary() {
-                  val heading = text(
-                      "Библиотека",
-                      34f,
-                      white,
-                      true
-                  )
-
-                  val headingParams =
-                      LinearLayout.LayoutParams(-1, dp(70))
-                  headingParams.topMargin = dp(20)
-
-                  page.addView(heading, headingParams)
-
-                  page.addView(
-                      text(
-                          "${apps.size} установленных приложений",
-                          14f,
-                          muted
-                      )
-                  )
-
-                  val scroll = ScrollView(this).apply {
-                      isVerticalScrollBarEnabled = false
-                  }
-
-                  val grid = LinearLayout(this).apply {
-                      orientation = LinearLayout.VERTICAL
-                  }
-
-                  val columns = 5
-
-                  apps.forEachIndexed { index, app ->
-                      if (index % columns == 0) {
-                          grid.addView(
-                              LinearLayout(this).apply {
-                                  orientation = LinearLayout.HORIZONTAL
-                                  gravity = Gravity.CENTER_VERTICAL
-                              },
-                              LinearLayout.LayoutParams(-1, dp(180))
-                          )
-                      }
-
-                      val row = grid.getChildAt(
-                          grid.childCount - 1
-                      ) as LinearLayout
-
-                      row.addView(
-                          createAppTile(app, index, true),
-                          LinearLayout.LayoutParams(
-                              0,
-                              dp(160),
-                              1f
-                          ).apply {
-                              marginEnd = dp(13)
-                          }
-                      )
-                  }
-
-                  scroll.addView(grid)
-
-                  page.addView(
-                      scroll,
-                      LinearLayout.LayoutParams(-1, 0, 1f)
-                  )
-              }
-
-              private fun createDock() {
-                  val dock = LinearLayout(this).apply {
-                      orientation = LinearLayout.HORIZONTAL
-                      gravity = Gravity.CENTER_VERTICAL
-                      background = gradient(
-                          intArrayOf(
-                              Color.argb(210, 20, 29, 49),
-                              Color.argb(225, 9, 14, 27)
-                          ),
-                          18
-                      )
-                      setPadding(dp(12), dp(5), dp(12), dp(5))
-                  }
-
-                  val items = listOf(
-                      Triple("⌂", "ГЛАВНАЯ", Screen.HOME),
-                      Triple("▣", "HDMI", Screen.HDMI),
-                      Triple("▤", "БИБЛИОТЕКА", Screen.LIBRARY)
-                  )
-
-                  items.forEach { item ->
-                      val button = LinearLayout(this).apply {
-                          orientation = LinearLayout.HORIZONTAL
-                          gravity = Gravity.CENTER
-                          setPadding(dp(20), dp(8), dp(20), dp(8))
-                      }
-
-                      val symbol = text(
-                          item.first,
-                          19f,
-                          white,
+                  tile.setOnKeyListener { _, keyCode, event ->
+                      if (
+                          keyCode == KeyEvent.KEYCODE_DPAD_UP &&
+                          event.action == KeyEvent.ACTION_DOWN
+                      ) {
+                          slideToHome()
                           true
-                      )
-
-                      button.addView(symbol)
-
-                      val name = text(
-                          item.second,
-                          11f,
-                          muted,
-                          true
-                      )
-
-                      val nameParams =
-                          LinearLayout.LayoutParams(-2, dp(36))
-                      nameParams.marginStart = dp(9)
-
-                      button.addView(name, nameParams)
-
-                      focusStyle(button)
-
-                      button.tag = when (item.third) {
-                          Screen.HOME -> "dock_home"
-                          Screen.HDMI -> "dock_hdmi"
-                          Screen.LIBRARY -> "dock_library"
+                      } else {
+                          false
                       }
+                  }
 
-                      button.setOnClickListener {
-                          if (currentPage != item.third) {
-                              showScreen(item.third)
+                  return tile
+              }
+
+              private fun slideToHdmi() {
+                  if (
+                      currentScreen == Screen.HDMI ||
+                      animationRunning ||
+                      libraryOpen
+                  ) return
+
+                  if (pageHeight <= 0) {
+                      pageHeight = root.height
+                  }
+
+                  if (pageHeight <= 0) return
+
+                  animationRunning = true
+                  currentScreen = Screen.HDMI
+
+                  hdmiPage.translationY = pageHeight.toFloat()
+
+                  homePage.animate()
+                      .translationY(-pageHeight.toFloat())
+                      .setDuration(420)
+                      .setInterpolator(DecelerateInterpolator())
+                      .start()
+
+                  hdmiPage.animate()
+                      .translationY(0f)
+                      .setDuration(420)
+                      .setInterpolator(DecelerateInterpolator())
+                      .withEndAction {
+                          animationRunning = false
+                          hdmiPage.requestFocus()
+
+                          if (hdmiPage.isFocusable) {
+                              hdmiPage.isFocusable = true
                           }
-                      }
 
-                      dock.addView(
-                          button,
-                          LinearLayout.LayoutParams(
-                              0,
-                              dp(48),
-                              1f
+                          focusFirstSource()
+                      }
+                      .start()
+              }
+
+              private fun slideToHome() {
+                  if (
+                      currentScreen == Screen.HOME ||
+                      animationRunning ||
+                      libraryOpen
+                  ) return
+
+                  animationRunning = true
+                  currentScreen = Screen.HOME
+
+                  homePage.animate()
+                      .translationY(0f)
+                      .setDuration(420)
+                      .setInterpolator(DecelerateInterpolator())
+                      .start()
+
+                  hdmiPage.animate()
+                      .translationY(pageHeight.toFloat())
+                      .setDuration(420)
+                      .setInterpolator(DecelerateInterpolator())
+                      .withEndAction {
+                          animationRunning = false
+                          focusFirstApp()
+                      }
+                      .start()
+              }
+
+              private fun focusFirstApp() {
+                  val scroll = findFirstFocusable(homePage)
+                  scroll?.requestFocus()
+              }
+
+              private fun focusFirstSource() {
+                  val first = findFirstFocusable(hdmiPage)
+                  first?.requestFocus()
+              }
+
+              private fun findFirstFocusable(view: View): View? {
+                  if (
+                      view.isFocusable &&
+                      view !== homePage &&
+                      view !== hdmiPage
+                  ) return view
+
+                  if (view is ViewGroup) {
+                      for (i in 0 until view.childCount) {
+                          val result = findFirstFocusable(
+                              view.getChildAt(i)
                           )
-                      )
-                  }
 
-                  val settings = text(
-                      "⚙",
-                      22f,
-                      muted,
-                      true
-                  ).apply {
-                      gravity = Gravity.CENTER
-                      isFocusable = true
-                      setPadding(dp(20), 0, dp(20), 0)
-                      setOnClickListener {
-                          try {
-                              startActivity(
-                                  Intent(
-                                      android.provider.Settings.ACTION_SETTINGS
-                                  )
-                              )
-                          } catch (_: Exception) {
-                          }
+                          if (result != null) return result
                       }
                   }
 
-                  dock.addView(
-                      settings,
-                      LinearLayout.LayoutParams(dp(65), dp(48))
-                  )
-
-                  val params =
-                      LinearLayout.LayoutParams(-1, dp(60))
-                  params.topMargin = dp(8)
-
-                  page.addView(dock, params)
+                  return null
               }
 
               private fun launchApp(app: AppEntry) {
@@ -1110,71 +1109,209 @@ jobs:
                   }
               }
 
+              private fun switchInput(source: TvSource) {
+                  try {
+                      val uri =
+                          TvContract.buildChannelUriForPassthroughInput(
+                              source.inputId
+                          )
+
+                      startActivity(
+                          Intent(Intent.ACTION_VIEW, uri)
+                      )
+                  } catch (_: Exception) {
+                      Toast.makeText(
+                          this,
+                          "Телевизор не разрешил переключить HDMI напрямую",
+                          Toast.LENGTH_LONG
+                      ).show()
+                  }
+              }
+
+              private fun openLibrary() {
+                  if (libraryOpen) return
+
+                  libraryOpen = true
+
+                  val library = FrameLayout(this)
+
+                  library.addView(
+                      View(this).apply {
+                          background = makeGradient(
+                              intArrayOf(
+                                  Color.rgb(17, 37, 75),
+                                  Color.rgb(5, 8, 17)
+                              )
+                          )
+                      },
+                      FrameLayout.LayoutParams(-1, -1)
+                  )
+
+                  val content = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(
+                          dp(60), dp(25),
+                          dp(60), dp(25)
+                      )
+                  }
+
+                  library.addView(
+                      content,
+                      FrameLayout.LayoutParams(-1, -1)
+                  )
+
+                  val header = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                  }
+
+                  header.addView(
+                      label(
+                          "БИБЛИОТЕКА",
+                          24f,
+                          white,
+                          true
+                      ),
+                      LinearLayout.LayoutParams(0, dp(60), 1f)
+                  )
+
+                  val back = label(
+                      "← НАЗАД",
+                      12f,
+                      muted,
+                      true
+                  ).apply {
+                      isFocusable = true
+                      setOnClickListener {
+                          closeLibrary()
+                      }
+                  }
+
+                  header.addView(back)
+                  content.addView(header)
+
+                  content.addView(
+                      label(
+                          "${apps.size} УСТАНОВЛЕННЫХ ПРИЛОЖЕНИЙ",
+                          11f,
+                          muted,
+                          true
+                      )
+                  )
+
+                  val scroll = ScrollView(this).apply {
+                      isVerticalScrollBarEnabled = false
+                  }
+
+                  val grid = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                  }
+
+                  apps.forEachIndexed { index, app ->
+                      if (index % 5 == 0) {
+                          grid.addView(
+                              LinearLayout(this).apply {
+                                  orientation = LinearLayout.HORIZONTAL
+                                  gravity = Gravity.CENTER_VERTICAL
+                              },
+                              LinearLayout.LayoutParams(-1, dp(175))
+                          )
+                      }
+
+                      val row = grid.getChildAt(
+                          grid.childCount - 1
+                      ) as LinearLayout
+
+                      val tile = createAppTile(app, index)
+
+                      row.addView(
+                          tile,
+                          LinearLayout.LayoutParams(
+                              0,
+                              dp(150),
+                              1f
+                          ).apply {
+                              marginEnd = dp(12)
+                          }
+                      )
+                  }
+
+                  scroll.addView(grid)
+
+                  content.addView(
+                      scroll,
+                      LinearLayout.LayoutParams(-1, 0, 1f)
+                  )
+
+                  root.addView(
+                      library,
+                      FrameLayout.LayoutParams(-1, -1)
+                  )
+
+                  library.tag = "library_overlay"
+                  back.requestFocus()
+              }
+
+              private fun closeLibrary() {
+                  val overlay =
+                      root.findViewWithTag<View>("library_overlay")
+
+                  if (overlay != null) {
+                      root.removeView(overlay)
+                  }
+
+                  libraryOpen = false
+                  focusFirstApp()
+              }
+
               override fun onKeyDown(
                   keyCode: Int,
                   event: KeyEvent?
               ): Boolean {
-                  if (keyCode == KeyEvent.KEYCODE_BACK) {
-                      when (currentPage) {
-                          Screen.HDMI, Screen.LIBRARY -> {
-                              showScreen(Screen.HOME)
-                              return true
-                          }
+                  if (libraryOpen) {
+                      if (keyCode == KeyEvent.KEYCODE_BACK) {
+                          closeLibrary()
+                          return true
+                      }
 
-                          Screen.HOME -> return super.onKeyDown(
-                              keyCode,
-                              event
-                          )
+                      return super.onKeyDown(keyCode, event)
+                  }
+
+                  if (keyCode == KeyEvent.KEYCODE_BACK) {
+                      if (currentScreen == Screen.HDMI) {
+                          slideToHome()
+                          return true
                       }
                   }
 
-                  if (keyCode == KeyEvent.KEYCODE_MENU) {
-                      showScreen(Screen.HDMI)
+                  if (
+                      keyCode == KeyEvent.KEYCODE_DPAD_DOWN &&
+                      currentScreen == Screen.HOME
+                  ) {
+                      slideToHdmi()
                       return true
                   }
 
-                  if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                      val focused = currentFocus
-
-                      if (
-                          currentPage == Screen.HOME &&
-                          focused?.tag?.toString()?.startsWith("app_") == true ||
-                          currentPage == Screen.HOME &&
-                          focused?.tag == "first_app"
-                      ) {
-                          page.findViewWithTag<View>("dock_hdmi")
-                              ?.requestFocus()
-                          return true
-                      }
-                  }
-
-                  if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                      val focused = currentFocus
-
-                      if (
-                          focused?.tag == "dock_hdmi" ||
-                          focused?.tag == "dock_home" ||
-                          focused?.tag == "dock_library"
-                      ) {
-                          when (currentPage) {
-                              Screen.HOME -> page
-                                  .findViewWithTag<View>("first_app")
-                                  ?.requestFocus()
-
-                              Screen.HDMI -> page
-                                  .findViewWithTag<View>("first_source")
-                                  ?.requestFocus()
-
-                              Screen.LIBRARY -> page
-                                  .findViewWithTag<View>("first_library")
-                                  ?.requestFocus()
-                          }
-
-                          return true
-                      }
+                  if (
+                      keyCode == KeyEvent.KEYCODE_DPAD_UP &&
+                      currentScreen == Screen.HDMI
+                  ) {
+                      slideToHome()
+                      return true
                   }
 
                   return super.onKeyDown(keyCode, event)
+              }
+
+              @Deprecated("Deprecated in Android")
+              override fun onBackPressed() {
+                  if (libraryOpen) {
+                      closeLibrary()
+                  } else if (currentScreen == Screen.HDMI) {
+                      slideToHome()
+                  } else {
+                      super.onBackPressed()
+                  }
               }
           }
           EOF
@@ -1187,5 +1324,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Amethyst-TV-OS-v7
+          name: Amethyst-TV-OS-v8
           path: amethyst/app/build/outputs/apk/debug/app-debug.apk
