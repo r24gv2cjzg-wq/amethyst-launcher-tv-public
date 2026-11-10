@@ -76,8 +76,8 @@ jobs:
                   applicationId = "com.amethyst.launcher"
                   minSdk = 23
                   targetSdk = 28
-                  versionCode = 2
-                  versionName = "2.0"
+                  versionCode = 3
+                  versionName = "3.0"
               }
 
               compileOptions {
@@ -146,7 +146,7 @@ jobs:
           import android.os.Handler
           import android.os.Looper
           import android.content.Intent
-          import android.content.pm.PackageManager
+          import android.content.pm.ResolveInfo
           import android.graphics.Color
           import android.graphics.Typeface
           import android.graphics.drawable.GradientDrawable
@@ -156,7 +156,9 @@ jobs:
           import android.view.KeyEvent
           import android.view.View
           import android.view.ViewGroup
+          import android.widget.FrameLayout
           import android.widget.HorizontalScrollView
+          import android.widget.ImageView
           import android.widget.LinearLayout
           import android.widget.TextView
           import java.text.SimpleDateFormat
@@ -165,78 +167,105 @@ jobs:
 
           class MainActivity : Activity() {
 
-              private val bg = Color.rgb(7, 12, 30)
-              private val cardColor = Color.rgb(23, 34, 66)
-              private val accent = Color.rgb(92, 125, 255)
+              private val navy = Color.rgb(5, 9, 25)
+              private val panel = Color.rgb(15, 24, 49)
+              private val tileColor = Color.rgb(24, 37, 70)
+              private val blue = Color.rgb(75, 115, 255)
               private val white = Color.WHITE
-              private val muted = Color.rgb(160, 174, 205)
+              private val secondary = Color.rgb(166, 181, 211)
 
               private lateinit var root: LinearLayout
+              private lateinit var heroTitle: TextView
+              private lateinit var heroSubtitle: TextView
+              private lateinit var heroIcon: ImageView
+              private lateinit var heroInitial: TextView
               private lateinit var clock: TextView
               private lateinit var network: TextView
-              private lateinit var scroll: HorizontalScrollView
-              private lateinit var cards: LinearLayout
+              private lateinit var carousel: LinearLayout
+              private lateinit var carouselScroll: HorizontalScrollView
+              private lateinit var sectionTitle: TextView
+              private lateinit var libraryButton: TextView
 
               private val handler = Handler(Looper.getMainLooper())
+              private val appItems = mutableListOf<AppItem>()
+              private var showingLibrary = false
+              private var selectedPackage = ""
 
-              private val clockRunnable = object : Runnable {
+              private data class AppItem(
+                  val title: String,
+                  val packageName: String,
+                  val activityName: String,
+                  val icon: android.graphics.drawable.Drawable
+              )
+
+              private val clockTask = object : Runnable {
                   override fun run() {
                       if (::clock.isInitialized) {
                           clock.text = SimpleDateFormat(
-                              "HH:mm  •  EEEE, d MMMM",
+                              "HH:mm",
                               Locale.getDefault()
                           ).format(Date())
                       }
 
                       if (::network.isInitialized) {
-                          network.text = if (isOnline()) "● ONLINE" else "● OFFLINE"
+                          val online = isOnline()
+                          network.text = if (online) "● ONLINE" else "● OFFLINE"
                           network.setTextColor(
-                              if (isOnline()) Color.rgb(100, 220, 160)
-                              else Color.rgb(255, 130, 130)
+                              if (online) Color.rgb(105, 220, 165)
+                              else Color.rgb(255, 135, 135)
                           )
                       }
 
-                      handler.postDelayed(this, 1000)
+                      handler.postDelayed(this, 15000)
                   }
               }
 
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
 
-                  window.statusBarColor = bg
-                  window.navigationBarColor = bg
+                  window.statusBarColor = navy
+                  window.navigationBarColor = navy
                   window.decorView.systemUiVisibility =
                       View.SYSTEM_UI_FLAG_FULLSCREEN or
                       View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
                       View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
 
-                  buildUI()
-                  handler.post(clockRunnable)
+                  loadInstalledApps()
+                  buildInterface()
+                  handler.post(clockTask)
               }
 
               override fun onDestroy() {
-                  handler.removeCallbacks(clockRunnable)
+                  handler.removeCallbacks(clockTask)
                   super.onDestroy()
               }
 
               private fun dp(value: Int): Int =
                   (value * resources.displayMetrics.density).toInt()
 
-              private fun background(color: Int, radius: Int): GradientDrawable {
+              private fun rounded(
+                  color: Int,
+                  radius: Int,
+                  strokeColor: Int = Color.TRANSPARENT,
+                  strokeWidth: Int = 0
+              ): GradientDrawable {
                   return GradientDrawable().apply {
                       setColor(color)
                       cornerRadius = dp(radius).toFloat()
+                      if (strokeWidth > 0) {
+                          setStroke(dp(strokeWidth), strokeColor)
+                      }
                   }
               }
 
-              private fun label(
-                  text: String,
+              private fun text(
+                  value: String,
                   size: Float,
                   color: Int,
                   bold: Boolean = false
               ): TextView {
                   return TextView(this).apply {
-                      this.text = text
+                      text = value
                       textSize = size
                       setTextColor(color)
                       if (bold) setTypeface(null, Typeface.BOLD)
@@ -244,103 +273,11 @@ jobs:
                   }
               }
 
-              private fun buildUI() {
-                  root = LinearLayout(this).apply {
-                      orientation = LinearLayout.VERTICAL
-                      setPadding(dp(48), dp(24), dp(48), dp(24))
-                      setBackgroundColor(bg)
-                      isFocusable = true
-                      isFocusableInTouchMode = true
-                  }
-
-                  val top = LinearLayout(this).apply {
-                      orientation = LinearLayout.HORIZONTAL
-                      gravity = Gravity.CENTER_VERTICAL
-                  }
-
-                  val logo = label("AMETHYST", 25f, white, true)
-                  top.addView(logo, LinearLayout.LayoutParams(0, dp(48), 1f))
-
-                  network = label("● ONLINE", 13f, Color.GREEN, true)
-                  top.addView(network)
-
-                  clock = label("", 15f, muted)
-                  clock.gravity = Gravity.CENTER
-                  val clockParams = LinearLayout.LayoutParams(
-                      ViewGroup.LayoutParams.WRAP_CONTENT,
-                      dp(48)
-                  )
-                  clockParams.marginStart = dp(28)
-                  top.addView(clock, clockParams)
-
-                  root.addView(top)
-
-                  val heading = label("Добро пожаловать", 30f, white, true)
-                  val headingParams = LinearLayout.LayoutParams(
-                      ViewGroup.LayoutParams.MATCH_PARENT,
-                      dp(55)
-                  )
-                  headingParams.topMargin = dp(28)
-                  root.addView(heading, headingParams)
-
-                  val subtitle = label(
-                      "Выберите приложение",
-                      15f,
-                      muted
-                  )
-                  root.addView(subtitle)
-
-                  scroll = HorizontalScrollView(this).apply {
-                      isHorizontalScrollBarEnabled = false
-                      clipToPadding = false
-                      setPadding(dp(4), dp(20), dp(4), dp(20))
-                      descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
-                  }
-
-                  cards = LinearLayout(this).apply {
-                      orientation = LinearLayout.HORIZONTAL
-                      gravity = Gravity.CENTER_VERTICAL
-                  }
-
-                  scroll.addView(cards)
-                  val scrollParams = LinearLayout.LayoutParams(
-                      ViewGroup.LayoutParams.MATCH_PARENT,
-                      dp(230)
-                  )
-                  scrollParams.topMargin = dp(12)
-                  root.addView(scroll, scrollParams)
-
-                  val footer = label(
-                      "AMETHYST LAUNCHER  •  ANDROID TV",
-                      11f,
-                      muted
-                  )
-                  footer.gravity = Gravity.CENTER
-                  root.addView(footer)
-
-                  setContentView(root)
-                  loadApps()
-
-                  root.post {
-                      if (cards.childCount > 0) {
-                          cards.getChildAt(0).requestFocus()
-                      }
-                  }
-              }
-
-              private fun loadApps() {
-                  cards.removeAllViews()
-
-                  addCard(
-                      "⚙",
-                      "Настройки",
-                      "Система и Wi-Fi"
-                  ) {
-                      startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
-                  }
+              private fun loadInstalledApps() {
+                  appItems.clear()
 
                   val pm = packageManager
-                  val found = mutableMapOf<String, android.content.pm.ResolveInfo>()
+                  val found = linkedMapOf<String, ResolveInfo>()
 
                   val categories = listOf(
                       Intent.CATEGORY_LEANBACK_LAUNCHER,
@@ -348,140 +285,510 @@ jobs:
                   )
 
                   for (category in categories) {
-                      val intent = Intent(Intent.ACTION_MAIN).addCategory(category)
-                      val results = pm.queryIntentActivities(intent, 0)
+                      val query = Intent(Intent.ACTION_MAIN).addCategory(category)
+                      val results = pm.queryIntentActivities(query, 0)
 
                       for (result in results) {
                           val packageName = result.activityInfo.packageName
-                          if (packageName != packageNameOfSelf()) {
+
+                          if (packageName != this.packageName) {
                               found[packageName] = result
                           }
                       }
                   }
 
-                  val apps = found.values.sortedBy {
+                  for (result in found.values.sortedBy {
                       it.loadLabel(pm).toString().lowercase()
-                  }
-
-                  for (app in apps) {
-                      val name = app.loadLabel(pm).toString()
-                      val icon = app.loadIcon(pm)
-                      val packageName = app.activityInfo.packageName
-
-                      addCard(name.take(1).uppercase(), name, "Запустить приложение", icon) {
-                          val launch = pm.getLaunchIntentForPackage(packageName)
-                          if (launch != null) {
-                              launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                              startActivity(launch)
-                          }
-                      }
-                  }
-
-                  addCard("↻", "Обновить", "Обновить список") {
-                      loadApps()
+                  }) {
+                      appItems.add(
+                          AppItem(
+                              title = result.loadLabel(pm).toString(),
+                              packageName = result.activityInfo.packageName,
+                              activityName = result.activityInfo.name,
+                              icon = result.loadIcon(pm)
+                          )
+                      )
                   }
               }
 
-              private fun packageNameOfSelf(): String = packageName
+              private fun buildInterface() {
+                  root = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(dp(58), dp(25), dp(58), dp(22))
+                      background = GradientDrawable(
+                          GradientDrawable.Orientation.TL_BR,
+                          intArrayOf(
+                              Color.rgb(12, 24, 55),
+                              Color.rgb(5, 9, 25),
+                              Color.rgb(3, 6, 17)
+                          )
+                      )
+                  }
 
-              private fun addCard(
-                  symbol: String,
-                  title: String,
-                  description: String,
-                  icon: android.graphics.drawable.Drawable? = null,
-                  action: () -> Unit
-              ) {
+                  buildTopBar()
+                  buildHero()
+                  buildAppSection()
+                  buildBottomBar()
+
+                  setContentView(root)
+                  showApps()
+
+                  root.post {
+                      if (carousel.childCount > 0) {
+                          carousel.getChildAt(0).requestFocus()
+                      }
+                  }
+              }
+
+              private fun buildTopBar() {
+                  val top = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                  }
+
+                  val logo = text("AMETHYST", 23f, white, true)
+                  top.addView(
+                      logo,
+                      LinearLayout.LayoutParams(0, dp(48), 1f)
+                  )
+
+                  val edition = text("PS EDITION", 11f, blue, true)
+                  top.addView(edition)
+
+                  network = text("● ONLINE", 12f, Color.GREEN, true)
+                  val networkParams = LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.WRAP_CONTENT,
+                      dp(48)
+                  )
+                  networkParams.marginStart = dp(28)
+                  top.addView(network, networkParams)
+
+                  clock = text("--:--", 18f, white, true)
+                  clock.gravity = Gravity.CENTER
+                  val clockParams = LinearLayout.LayoutParams(dp(75), dp(48))
+                  clockParams.marginStart = dp(24)
+                  top.addView(clock, clockParams)
+
+                  root.addView(top)
+              }
+
+              private fun buildHero() {
+                  val hero = FrameLayout(this).apply {
+                      background = GradientDrawable(
+                          GradientDrawable.Orientation.LEFT_RIGHT,
+                          intArrayOf(
+                              Color.rgb(28, 48, 102),
+                              Color.rgb(16, 29, 65),
+                              Color.rgb(12, 19, 43)
+                          )
+                      ).apply {
+                          cornerRadius = dp(24).toFloat()
+                      }
+                      setPadding(dp(30), dp(20), dp(30), dp(20))
+                  }
+
+                  val content = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                  }
+
+                  val details = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                  }
+
+                  val eyebrow = text(
+                      "YOUR ENTERTAINMENT SPACE",
+                      11f,
+                      Color.rgb(157, 184, 255),
+                      true
+                  )
+                  details.addView(eyebrow)
+
+                  heroTitle = text(
+                      "Добро пожаловать",
+                      31f,
+                      white,
+                      true
+                  )
+                  val titleParams = LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      dp(55)
+                  )
+                  titleParams.topMargin = dp(8)
+                  details.addView(heroTitle, titleParams)
+
+                  heroSubtitle = text(
+                      "Выбери приложение, чтобы начать",
+                      15f,
+                      secondary
+                  )
+                  details.addView(heroSubtitle)
+
+                  val hint = text(
+                      "✦   Нажми OK, чтобы открыть",
+                      12f,
+                      Color.rgb(190, 204, 235)
+                  )
+                  val hintParams = LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      dp(35)
+                  )
+                  hintParams.topMargin = dp(18)
+                  details.addView(hint, hintParams)
+
+                  content.addView(
+                      details,
+                      LinearLayout.LayoutParams(0, dp(175), 1f)
+                  )
+
+                  val iconFrame = FrameLayout(this).apply {
+                      background = rounded(
+                          Color.argb(45, 255, 255, 255),
+                          24
+                      )
+                  }
+
+                  heroIcon = ImageView(this).apply {
+                      scaleType = ImageView.ScaleType.FIT_CENTER
+                      setPadding(dp(15), dp(15), dp(15), dp(15))
+                  }
+
+                  heroInitial = text("A", 60f, white, true).apply {
+                      gravity = Gravity.CENTER
+                  }
+
+                  iconFrame.addView(
+                      heroInitial,
+                      FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                  )
+
+                  iconFrame.addView(
+                      heroIcon,
+                      FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                  )
+
+                  val iconParams = LinearLayout.LayoutParams(dp(145), dp(145))
+                  iconParams.marginStart = dp(25)
+                  content.addView(iconFrame, iconParams)
+
+                  hero.addView(
+                      content,
+                      FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                  )
+
+                  val params = LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      dp(220)
+                  )
+                  params.topMargin = dp(25)
+                  root.addView(hero, params)
+              }
+
+              private fun buildAppSection() {
+                  val heading = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                  }
+
+                  sectionTitle = text("Недавние приложения", 19f, white, true)
+                  heading.addView(
+                      sectionTitle,
+                      LinearLayout.LayoutParams(0, dp(38), 1f)
+                  )
+
+                  libraryButton = text("БИБЛИОТЕКА  →", 12f, secondary, true).apply {
+                      isFocusable = true
+                      isClickable = true
+                      setPadding(dp(12), dp(5), dp(12), dp(5))
+                      background = rounded(panel, 12)
+                      setOnClickListener {
+                          showingLibrary = !showingLibrary
+                          showApps()
+                      }
+                      setOnFocusChangeListener { view, focused ->
+                          view.background = rounded(
+                              if (focused) blue else panel,
+                              12
+                          )
+                          view.setTextColor(if (focused) white else secondary)
+                      }
+                  }
+
+                  heading.addView(libraryButton)
+                  val headingParams = LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      dp(42)
+                  )
+                  headingParams.topMargin = dp(17)
+                  root.addView(heading, headingParams)
+
+                  carouselScroll = HorizontalScrollView(this).apply {
+                      isHorizontalScrollBarEnabled = false
+                      clipToPadding = false
+                      descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+                      setPadding(dp(5), dp(12), dp(5), dp(15))
+                  }
+
+                  carousel = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                  }
+
+                  carouselScroll.addView(carousel)
+
+                  val scrollParams = LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      dp(190)
+                  )
+                  root.addView(carouselScroll, scrollParams)
+              }
+
+              private fun buildBottomBar() {
+                  val bottom = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                      background = rounded(
+                          Color.argb(210, 13, 22, 46),
+                          17
+                      )
+                      setPadding(dp(14), dp(7), dp(14), dp(7))
+                  }
+
+                  val items = listOf(
+                      "⚙  Настройки" to {
+                          startActivity(
+                              Intent(android.provider.Settings.ACTION_SETTINGS)
+                          )
+                      },
+                      "↻  Обновить" to {
+                          loadInstalledApps()
+                          showApps()
+                      },
+                      "⌂  Главная" to {
+                          showingLibrary = false
+                          showApps()
+                      }
+                  )
+
+                  for ((name, action) in items) {
+                      val item = text(name, 12f, secondary, true).apply {
+                          isFocusable = true
+                          isClickable = true
+                          gravity = Gravity.CENTER
+                          setPadding(dp(14), dp(8), dp(14), dp(8))
+                          background = rounded(Color.TRANSPARENT, 10)
+
+                          setOnFocusChangeListener { view, focused ->
+                              view.background = rounded(
+                                  if (focused) blue else Color.TRANSPARENT,
+                                  10
+                              )
+                              view.setTextColor(if (focused) white else secondary)
+                          }
+
+                          setOnClickListener { action() }
+                      }
+
+                      bottom.addView(
+                          item,
+                          LinearLayout.LayoutParams(
+                              0,
+                              dp(38),
+                              1f
+                          )
+                      )
+                  }
+
+                  val params = LinearLayout.LayoutParams(
+                      ViewGroup.LayoutParams.MATCH_PARENT,
+                      dp(52)
+                  )
+                  params.topMargin = dp(5)
+                  root.addView(bottom, params)
+              }
+
+              private fun showApps() {
+                  if (!::carousel.isInitialized) return
+
+                  carousel.removeAllViews()
+
+                  sectionTitle.text = if (showingLibrary) {
+                      "Библиотека приложений"
+                  } else {
+                      "Недавние приложения"
+                  }
+
+                  val visible = if (showingLibrary) {
+                      appItems
+                  } else {
+                      appItems.take(12)
+                  }
+
+                  if (visible.isEmpty()) {
+                      val empty = text(
+                          "Приложения не найдены",
+                          16f,
+                          secondary
+                      )
+                      carousel.addView(empty)
+                      return
+                  }
+
+                  for (app in visible) {
+                      addAppTile(app)
+                  }
+
+                  if (selectedPackage.isNotEmpty()) {
+                      val selectedIndex = visible.indexOfFirst {
+                          it.packageName == selectedPackage
+                      }
+                      if (selectedIndex >= 0) {
+                          carousel.post {
+                              carousel.getChildAt(selectedIndex)?.requestFocus()
+                          }
+                      }
+                  }
+              }
+
+              private fun addAppTile(app: AppItem) {
                   val tile = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
                       gravity = Gravity.CENTER
-                      setPadding(dp(12), dp(14), dp(12), dp(14))
-                      background = background(cardColor, 18)
+                      setPadding(dp(12), dp(12), dp(12), dp(10))
+                      background = rounded(tileColor, 17)
                       isFocusable = true
                       isFocusableInTouchMode = true
                       isClickable = true
                   }
 
-                  val iconView = if (icon != null) {
-                      android.widget.ImageView(this).apply {
-                          setImageDrawable(icon)
-                          scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-                      }
-                  } else {
-                      TextView(this).apply {
-                          text = symbol
-                          textSize = 35f
-                          setTextColor(white)
-                          gravity = Gravity.CENTER
-                          typeface = Typeface.DEFAULT_BOLD
-                      }
+                  val icon = ImageView(this).apply {
+                      setImageDrawable(app.icon)
+                      scaleType = ImageView.ScaleType.FIT_CENTER
                   }
 
                   tile.addView(
-                      iconView,
-                      LinearLayout.LayoutParams(dp(58), dp(58))
+                      icon,
+                      LinearLayout.LayoutParams(dp(68), dp(68))
                   )
 
-                  val titleView = label(title, 15f, white, true)
-                  titleView.gravity = Gravity.CENTER
-                  titleView.maxLines = 2
+                  val title = text(app.title, 13f, white, true).apply {
+                      gravity = Gravity.CENTER
+                      maxLines = 2
+                      ellipsize = android.text.TextUtils.TruncateAt.END
+                  }
+
                   val titleParams = LinearLayout.LayoutParams(
                       ViewGroup.LayoutParams.MATCH_PARENT,
-                      dp(42)
+                      dp(38)
                   )
-                  titleParams.topMargin = dp(8)
-                  tile.addView(titleView, titleParams)
-
-                  val desc = label(description, 10f, muted)
-                  desc.gravity = Gravity.CENTER
-                  tile.addView(
-                      desc,
-                      LinearLayout.LayoutParams(
-                          ViewGroup.LayoutParams.MATCH_PARENT,
-                          dp(24)
-                      )
-                  )
+                  titleParams.topMargin = dp(9)
+                  tile.addView(title, titleParams)
 
                   tile.setOnFocusChangeListener { view, focused ->
                       view.animate()
                           .scaleX(if (focused) 1.07f else 1f)
                           .scaleY(if (focused) 1.07f else 1f)
-                          .setDuration(130)
+                          .setDuration(150)
                           .start()
 
-                      view.background = background(
-                          if (focused) accent else cardColor,
-                          18
+                      view.background = rounded(
+                          if (focused) blue else tileColor,
+                          17,
+                          if (focused) Color.rgb(165, 190, 255)
+                          else Color.TRANSPARENT,
+                          if (focused) 2 else 0
                       )
 
                       if (focused) {
-                          scroll.smoothScrollTo(view.left - dp(20), 0)
+                          updateHero(app)
+                          carouselScroll.smoothScrollTo(
+                              view.left - dp(20),
+                              0
+                          )
                       }
                   }
 
-                  tile.setOnClickListener { action() }
+                  tile.setOnClickListener {
+                      launchApp(app)
+                  }
 
-                  val params = LinearLayout.LayoutParams(dp(155), dp(185))
-                  params.marginEnd = dp(18)
-                  cards.addView(tile, params)
+                  tile.setOnKeyListener { _, keyCode, event ->
+                      if (event.action == KeyEvent.ACTION_DOWN &&
+                          keyCode == KeyEvent.KEYCODE_DPAD_CENTER
+                      ) {
+                          launchApp(app)
+                          true
+                      } else {
+                          false
+                      }
+                  }
+
+                  val params = LinearLayout.LayoutParams(dp(145), dp(155))
+                  params.marginEnd = dp(17)
+                  carousel.addView(tile, params)
+              }
+
+              private fun updateHero(app: AppItem) {
+                  selectedPackage = app.packageName
+                  heroTitle.text = app.title
+                  heroSubtitle.text = app.packageName
+                  heroIcon.setImageDrawable(app.icon)
+                  heroInitial.text = app.title.take(1).uppercase()
+              }
+
+              private fun launchApp(app: AppItem) {
+                  try {
+                      val intent = packageManager.getLaunchIntentForPackage(
+                          app.packageName
+                      )
+
+                      if (intent != null) {
+                          intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                          startActivity(intent)
+                      }
+                  } catch (_: Exception) {
+                  }
               }
 
               private fun isOnline(): Boolean {
-                  val cm = getSystemService(CONNECTIVITY_SERVICE)
-                      as ConnectivityManager
-                  val network = cm.activeNetwork ?: return false
-                  val capabilities = cm.getNetworkCapabilities(network)
-                      ?: return false
+                  return try {
+                      val manager = getSystemService(CONNECTIVITY_SERVICE)
+                          as ConnectivityManager
+                      val active = manager.activeNetwork ?: return false
+                      val capabilities =
+                          manager.getNetworkCapabilities(active) ?: return false
 
-                  return capabilities.hasCapability(
-                      NetworkCapabilities.NET_CAPABILITY_INTERNET
-                  )
+                      capabilities.hasCapability(
+                          NetworkCapabilities.NET_CAPABILITY_INTERNET
+                      )
+                  } catch (_: Exception) {
+                      false
+                  }
               }
 
-              override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+              override fun onKeyDown(
+                  keyCode: Int,
+                  event: KeyEvent?
+              ): Boolean {
                   if (keyCode == KeyEvent.KEYCODE_MENU) {
                       startActivity(
                           Intent(android.provider.Settings.ACTION_SETTINGS)
                       )
+                      return true
+                  }
+
+                  if (keyCode == KeyEvent.KEYCODE_BACK && showingLibrary) {
+                      showingLibrary = false
+                      showApps()
                       return true
                   }
 
@@ -498,5 +805,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Amethyst-Launcher-PS-Edition
+          name: Amethyst-Launcher-PS-Edition-v3
           path: amethyst/app/build/outputs/apk/debug/app-debug.apk
