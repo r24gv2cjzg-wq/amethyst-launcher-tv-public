@@ -84,8 +84,8 @@ jobs:
                   applicationId 'com.amethyst.launcher'
                   minSdk 23
                   targetSdk 28
-                  versionCode 10
-                  versionName '10.0'
+                  versionCode 11
+                  versionName '10.1'
               }
 
               compileOptions {
@@ -165,6 +165,7 @@ jobs:
           import android.os.Bundle
           import android.content.Context
           import android.content.Intent
+          import android.provider.Settings
           import android.graphics.Color
           import android.graphics.Typeface
           import android.graphics.drawable.GradientDrawable
@@ -184,6 +185,8 @@ jobs:
           import android.widget.TextView
           import android.widget.Toast
           import java.util.Locale
+          import java.util.TimeZone
+          import java.text.SimpleDateFormat
 
           class MainActivity : Activity() {
 
@@ -295,7 +298,9 @@ jobs:
                       val packageName = info.activityInfo?.packageName
                           ?: return@mapNotNull null
 
-                      if (packageName == this.packageName) {
+                      if (packageName == this.packageName ||
+                          packageName == "com.mitv.tvhome.atv"
+                      ) {
                           return@mapNotNull null
                       }
 
@@ -324,7 +329,9 @@ jobs:
                           val packageName = info.activityInfo?.packageName
                               ?: return@mapNotNull null
 
-                          if (packageName == this.packageName) {
+                          if (packageName == this.packageName ||
+                              packageName == "com.mitv.tvhome.atv"
+                          ) {
                               return@mapNotNull null
                           }
 
@@ -522,7 +529,11 @@ jobs:
                           }
 
                           setOnClickListener {
-                              showPage(page)
+                              if (page == "settings") {
+                                  openSystemSettings()
+                              } else {
+                                  showPage(page)
+                              }
                           }
                       }
                   }
@@ -530,14 +541,14 @@ jobs:
                   nav.addView(item("ГЛАВНАЯ", "home"))
                   nav.addView(item("БИБЛИОТЕКА", "library"))
                   nav.addView(item("ИСТОЧНИКИ", "inputs"))
+                  nav.addView(item("НАСТРОЙКИ", "settings"))
 
                   header.addView(nav)
 
                   val clock = label(
-                      android.text.format.DateFormat.format(
-                          "HH:mm",
-                          System.currentTimeMillis()
-                      ).toString(),
+                      SimpleDateFormat("HH:mm", Locale("ru", "RU")).apply {
+                          timeZone = TimeZone.getTimeZone("Europe/Moscow")
+                      }.format(java.util.Date()),
                       15f,
                       white,
                       true
@@ -551,6 +562,27 @@ jobs:
                   )
 
                   return header
+              }
+
+              private fun openSystemSettings() {
+                  try {
+                      val intent = Intent(Settings.ACTION_SETTINGS)
+                      if (intent.resolveActivity(packageManager) != null) {
+                          startActivity(intent)
+                      } else {
+                          Toast.makeText(
+                              this,
+                              "Системные настройки недоступны",
+                              Toast.LENGTH_SHORT
+                          ).show()
+                      }
+                  } catch (_: Exception) {
+                      Toast.makeText(
+                          this,
+                          "Не удалось открыть настройки телевизора",
+                          Toast.LENGTH_SHORT
+                      ).show()
+                  }
               }
 
               private fun sectionTitle(value: String): TextView {
@@ -609,10 +641,6 @@ jobs:
                       orientation = LinearLayout.VERTICAL
                       setPadding(dp(28), 0, 0, 0)
                   }
-
-                  details.addView(
-                      label("ПРОДОЛЖИТЕ ИГРУ", 11f, accent, true)
-                  )
 
                   heroTitle = label("Добро пожаловать", 29f, white, true)
                   details.addView(heroTitle)
@@ -1280,6 +1308,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Amethyst-Launcher-10.0
+          name: Amethyst-Launcher-10.1
           path: amethyst/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
