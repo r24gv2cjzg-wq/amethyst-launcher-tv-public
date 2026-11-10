@@ -340,12 +340,14 @@ jobs:
 
                       physical.forEachIndexed { index, info ->
                           val port = index + 1
-                          val label = info.loadLabel(packageManager)
+
+                          // FIX: loadLabel() requires Context, not PackageManager.
+                          val label = info.loadLabel(this)
                               .toString()
 
                           val ps5 = port == 3 &&
                               cec != null &&
-                              cec.loadLabel(packageManager)
+                              cec.loadLabel(this)
                                   .toString()
                                   .contains("PlayStation", true)
 
