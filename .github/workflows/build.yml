@@ -1,4 +1,4 @@
-name: Amethyst Launcher PS Edition 6.0
+name: Amethyst TV OS 7.0
 
 on:
   workflow_dispatch:
@@ -45,7 +45,7 @@ jobs:
                   mavenCentral()
               }
           }
-          rootProject.name = "AmethystPS"
+          rootProject.name = "AmethystTV"
           include(":app")
           EOF
 
@@ -59,6 +59,8 @@ jobs:
           cat > amethyst/gradle.properties <<'EOF'
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
+          org.gradle.caching=true
+          org.gradle.parallel=true
           EOF
 
           cat > amethyst/app/build.gradle.kts <<'EOF'
@@ -75,8 +77,8 @@ jobs:
                   applicationId = "com.amethyst.launcher"
                   minSdk = 23
                   targetSdk = 28
-                  versionCode = 6
-                  versionName = "6.0"
+                  versionCode = 7
+                  versionName = "7.0"
               }
 
               compileOptions {
@@ -92,6 +94,7 @@ jobs:
 
           cat > amethyst/app/src/main/AndroidManifest.xml <<'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
               <queries>
                   <intent>
                       <action android:name="android.intent.action.MAIN"/>
@@ -105,13 +108,15 @@ jobs:
 
               <application
                   android:theme="@android:style/Theme.Material.NoActionBar"
-                  android:label="Amethyst"
-                  android:usesCleartextTraffic="true">
+                  android:label="Amethyst TV OS"
+                  android:usesCleartextTraffic="false"
+                  android:allowBackup="false">
 
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
-                      android:screenOrientation="landscape">
+                      android:screenOrientation="landscape"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
 
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN"/>
@@ -139,10 +144,13 @@ jobs:
           import android.app.Activity
           import android.os.Bundle
           import android.content.Intent
-          import android.content.pm.ResolveInfo
+          import android.content.Context
           import android.graphics.Color
           import android.graphics.Typeface
           import android.graphics.drawable.GradientDrawable
+          import android.media.tv.TvContract
+          import android.media.tv.TvInputInfo
+          import android.media.tv.TvInputManager
           import android.view.Gravity
           import android.view.KeyEvent
           import android.view.View
@@ -151,7 +159,10 @@ jobs:
           import android.widget.HorizontalScrollView
           import android.widget.ImageView
           import android.widget.LinearLayout
+          import android.widget.ScrollView
           import android.widget.TextView
+          import android.widget.Toast
+          import android.content.pm.ResolveInfo
           import android.text.TextUtils
           import java.text.SimpleDateFormat
           import java.util.Date
@@ -160,36 +171,42 @@ jobs:
           class MainActivity : Activity() {
 
               private lateinit var root: FrameLayout
+              private lateinit var page: LinearLayout
               private lateinit var background: View
-              private lateinit var rail: LinearLayout
-              private lateinit var railScroll: HorizontalScrollView
-              private lateinit var title: TextView
-              private lateinit var subtitle: TextView
-              private lateinit var heroIcon: ImageView
               private lateinit var clock: TextView
-              private lateinit var count: TextView
 
               private val apps = mutableListOf<AppEntry>()
+              private val sources = mutableListOf<TvSource>()
 
-              private var selected = 0
-              private var libraryMode = false
-              private var mediaMode = false
+              private var currentPage = Screen.HOME
+              private var selectedApp = 0
 
-              private val blue = Color.rgb(65, 125, 255)
+              private val dark = Color.rgb(5, 8, 18)
               private val white = Color.WHITE
-              private val muted = Color.rgb(177, 190, 215)
-              private val dark = Color.rgb(5, 8, 19)
+              private val muted = Color.rgb(160, 174, 202)
+              private val blue = Color.rgb(75, 130, 255)
 
-              data class AppEntry(
+              private enum class Screen {
+                  HOME, HDMI, LIBRARY
+              }
+
+              private data class AppEntry(
                   val name: String,
                   val packageName: String,
                   val icon: android.graphics.drawable.Drawable
               )
 
+              private data class TvSource(
+                  val name: String,
+                  val subtitle: String,
+                  val inputId: String,
+                  val symbol: String
+              )
+
               private fun dp(value: Int): Int =
                   (value * resources.displayMetrics.density).toInt()
 
-              private fun bg(
+              private fun gradient(
                   colors: IntArray,
                   radius: Int = 0
               ) = GradientDrawable(
@@ -199,7 +216,7 @@ jobs:
                   cornerRadius = dp(radius).toFloat()
               }
 
-              private fun label(
+              private fun text(
                   value: String,
                   size: Float,
                   color: Int = white,
@@ -212,35 +229,27 @@ jobs:
                   if (bold) setTypeface(null, Typeface.BOLD)
               }
 
-              private fun palette(index: Int): IntArray {
-                  val palettes = arrayOf(
-                      intArrayOf(
-                          Color.rgb(17, 65, 135),
-                          Color.rgb(8, 22, 57),
-                          dark
-                      ),
-                      intArrayOf(
-                          Color.rgb(75, 35, 112),
-                          Color.rgb(24, 15, 52),
-                          dark
-                      ),
-                      intArrayOf(
-                          Color.rgb(15, 91, 91),
-                          Color.rgb(8, 35, 49),
-                          dark
-                      ),
-                      intArrayOf(
-                          Color.rgb(120, 55, 35),
-                          Color.rgb(48, 22, 28),
-                          dark
-                      ),
-                      intArrayOf(
-                          Color.rgb(45, 58, 120),
-                          Color.rgb(17, 23, 55),
-                          dark
-                      )
-                  )
-                  return palettes[index.mod(palettes.size)]
+              private fun focusStyle(
+                  view: View,
+                  radius: Int = 12
+              ) {
+                  view.isFocusable = true
+                  view.isClickable = true
+
+                  view.setOnFocusChangeListener { v, focused ->
+                      v.animate()
+                          .scaleX(if (focused) 1.045f else 1f)
+                          .scaleY(if (focused) 1.045f else 1f)
+                          .alpha(if (focused) 1f else 0.88f)
+                          .setDuration(150)
+                          .start()
+
+                      if (v is TextView) {
+                          v.setTextColor(
+                              if (focused) white else muted
+                          )
+                      }
+                  }
               }
 
               override fun onCreate(savedInstanceState: Bundle?) {
@@ -248,13 +257,15 @@ jobs:
 
                   window.statusBarColor = dark
                   window.navigationBarColor = dark
+
                   window.decorView.systemUiVisibility =
                       View.SYSTEM_UI_FLAG_FULLSCREEN or
                       View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
                       View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
 
                   loadApps()
-                  createScreen()
+                  loadSources()
+                  showScreen(Screen.HOME)
               }
 
               private fun loadApps() {
@@ -262,41 +273,125 @@ jobs:
 
                   val found = linkedMapOf<String, ResolveInfo>()
 
-                  listOf(
+                  val categories = listOf(
                       Intent.CATEGORY_LEANBACK_LAUNCHER,
                       Intent.CATEGORY_LAUNCHER
-                  ).forEach { category ->
-                      val intent = Intent(Intent.ACTION_MAIN)
+                  )
+
+                  categories.forEach { category ->
+                      val query = Intent(Intent.ACTION_MAIN)
                           .addCategory(category)
 
-                      packageManager.queryIntentActivities(intent, 0)
-                          .forEach {
-                              val pkg = it.activityInfo.packageName
-                              if (pkg != packageName) found[pkg] = it
+                      packageManager
+                          .queryIntentActivities(query, 0)
+                          .forEach { info ->
+                              val pkg = info.activityInfo.packageName
+
+                              if (pkg != packageName) {
+                                  found[pkg] = info
+                              }
                           }
                   }
 
                   found.values
                       .sortedBy {
                           it.loadLabel(packageManager)
-                              .toString().lowercase()
+                              .toString()
+                              .lowercase()
                       }
-                      .forEach {
+                      .forEach { info ->
                           apps.add(
                               AppEntry(
-                                  it.loadLabel(packageManager).toString(),
-                                  it.activityInfo.packageName,
-                                  it.loadIcon(packageManager)
+                                  info.loadLabel(packageManager).toString(),
+                                  info.activityInfo.packageName,
+                                  info.loadIcon(packageManager)
                               )
                           )
                       }
               }
 
-              private fun createScreen() {
+              private fun loadSources() {
+                  sources.clear()
+
+                  try {
+                      val manager = getSystemService(
+                          Context.TV_INPUT_SERVICE
+                      ) as TvInputManager
+
+                      val inputs = manager.tvInputList
+
+                      val physical = inputs
+                          .filter {
+                              it.type == TvInputInfo.TYPE_HDMI &&
+                              !it.id.contains("HDMI300004")
+                          }
+                          .sortedBy { info ->
+                              Regex("HW(\\d+)$")
+                                  .find(info.id)
+                                  ?.groupValues
+                                  ?.getOrNull(1)
+                                  ?.toIntOrNull()
+                                  ?: 99
+                          }
+
+                      val cec = inputs.firstOrNull {
+                          it.id.contains("HDMI300004")
+                      }
+
+                      physical.forEachIndexed { index, info ->
+                          val port = index + 1
+                          val label = info.loadLabel(packageManager)
+                              .toString()
+
+                          val ps5 = port == 3 &&
+                              cec != null &&
+                              cec.loadLabel(packageManager)
+                                  .toString()
+                                  .contains("PlayStation", true)
+
+                          sources.add(
+                              TvSource(
+                                  name = if (ps5) {
+                                      "PlayStation 5"
+                                  } else {
+                                      "HDMI $port"
+                                  },
+                                  subtitle = if (ps5) {
+                                      "HDMI 3  •  ОБНАРУЖЕНО ПО HDMI-CEC"
+                                  } else {
+                                      label.uppercase(Locale.getDefault())
+                                  },
+                                  inputId = info.id,
+                                  symbol = if (ps5) "PS5" else "HDMI"
+                              )
+                          )
+                      }
+                  } catch (_: Exception) {
+                      sources.clear()
+                  }
+
+                  if (sources.isEmpty()) {
+                      Toast.makeText(
+                          this,
+                          "Не удалось получить список HDMI-входов",
+                          Toast.LENGTH_LONG
+                      ).show()
+                  }
+              }
+
+              private fun showScreen(screen: Screen) {
+                  currentPage = screen
+
                   root = FrameLayout(this)
 
                   background = View(this).apply {
-                      background = bg(palette(0))
+                      this.background = gradient(
+                          intArrayOf(
+                              Color.rgb(20, 48, 105),
+                              Color.rgb(10, 18, 43),
+                              dark
+                          )
+                      )
                   }
 
                   root.addView(
@@ -305,11 +400,11 @@ jobs:
                   )
 
                   val shade = View(this).apply {
-                      background = bg(
+                      this.background = gradient(
                           intArrayOf(
                               Color.argb(20, 0, 0, 0),
-                              Color.argb(100, 0, 0, 0),
-                              Color.argb(225, 0, 0, 0)
+                              Color.argb(95, 0, 0, 0),
+                              Color.argb(220, 0, 0, 0)
                           )
                       )
                   }
@@ -319,11 +414,11 @@ jobs:
                       FrameLayout.LayoutParams(-1, -1)
                   )
 
-                  val page = LinearLayout(this).apply {
+                  page = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
                       setPadding(
-                          dp(64), dp(20),
-                          dp(64), dp(18)
+                          dp(66), dp(22),
+                          dp(66), dp(20)
                       )
                   }
 
@@ -332,462 +427,684 @@ jobs:
                       FrameLayout.LayoutParams(-1, -1)
                   )
 
-                  createTopBar(page)
-                  createGameRail(page)
-                  createHero(page)
-                  createFooter(page)
+                  createHeader()
+
+                  when (screen) {
+                      Screen.HOME -> createHome()
+                      Screen.HDMI -> createHdmi()
+                      Screen.LIBRARY -> createLibrary()
+                  }
+
+                  createDock()
 
                   setContentView(root)
-                  refresh()
+
+                  page.post {
+                      when (screen) {
+                          Screen.HOME -> {
+                              page.findViewWithTag<View>("first_app")
+                                  ?.requestFocus()
+                                  ?: page.findViewWithTag<View>("dock_hdmi")
+                                      ?.requestFocus()
+                          }
+
+                          Screen.HDMI -> {
+                              page.findViewWithTag<View>("first_source")
+                                  ?.requestFocus()
+                                  ?: page.findViewWithTag<View>("dock_home")
+                                      ?.requestFocus()
+                          }
+
+                          Screen.LIBRARY -> {
+                              page.findViewWithTag<View>("first_library")
+                                  ?.requestFocus()
+                                  ?: page.findViewWithTag<View>("dock_home")
+                                      ?.requestFocus()
+                          }
+                      }
+                  }
               }
 
-              private fun createTopBar(parent: LinearLayout) {
-                  val bar = LinearLayout(this).apply {
+              private fun createHeader() {
+                  val header = LinearLayout(this).apply {
                       orientation = LinearLayout.HORIZONTAL
                       gravity = Gravity.CENTER_VERTICAL
                   }
 
-                  val brand = label(
+                  val brand = text(
                       "AMETHYST",
                       22f,
                       white,
                       true
                   )
 
-                  bar.addView(
+                  header.addView(
                       brand,
-                      LinearLayout.LayoutParams(0, dp(58), 1f)
+                      LinearLayout.LayoutParams(0, dp(52), 1f)
                   )
 
-                  val games = makeTab("ИГРЫ") {
-                      mediaMode = false
-                      libraryMode = false
-                      refresh()
-                  }
-
-                  val media = makeTab("МЕДИА") {
-                      mediaMode = true
-                      libraryMode = false
-                      refresh()
-                  }
-
-                  bar.addView(games)
-                  bar.addView(media)
-
-                  val profile = label("◉", 24f, white, true).apply {
-                      gravity = Gravity.CENTER
-                      isFocusable = true
-                      setPadding(dp(22), 0, dp(22), 0)
-                      setOnClickListener {
-                          startActivity(
-                              Intent(android.provider.Settings.ACTION_SETTINGS)
-                          )
-                      }
-                  }
-
-                  bar.addView(
-                      profile,
-                      LinearLayout.LayoutParams(dp(58), dp(52))
-                  )
-
-                  clock = label("00:00", 16f, white, true).apply {
-                      gravity = Gravity.CENTER
-                  }
-
-                  bar.addView(
-                      clock,
-                      LinearLayout.LayoutParams(dp(70), dp(52))
-                  )
-
-                  parent.addView(bar)
-              }
-
-              private fun makeTab(
-                  name: String,
-                  action: () -> Unit
-              ): TextView {
-                  return label(name, 13f, muted, true).apply {
-                      gravity = Gravity.CENTER
-                      isFocusable = true
-                      setPadding(dp(22), 0, dp(22), 0)
-
-                      setOnFocusChangeListener { view, focused ->
-                          (view as TextView).setTextColor(
-                              if (focused) white else muted
-                          )
-                      }
-
-                      setOnClickListener { action() }
-                  }
-              }
-
-              private fun createGameRail(parent: LinearLayout) {
-                  val heading = LinearLayout(this).apply {
-                      orientation = LinearLayout.HORIZONTAL
-                      gravity = Gravity.CENTER_VERTICAL
-                  }
-
-                  val section = label(
-                      "ИГРЫ",
-                      13f,
-                      Color.rgb(190, 205, 235),
+                  val status = text(
+                      "TV OS 7.0",
+                      11f,
+                      muted,
                       true
                   )
 
-                  heading.addView(
-                      section,
-                      LinearLayout.LayoutParams(0, dp(38), 1f)
+                  header.addView(
+                      status,
+                      LinearLayout.LayoutParams(-2, dp(52))
                   )
 
-                  count = label("", 12f, muted)
-                  heading.addView(count)
-
-                  val headingParams =
-                      LinearLayout.LayoutParams(-1, dp(38))
-                  headingParams.topMargin = dp(14)
-                  parent.addView(heading, headingParams)
-
-                  railScroll = HorizontalScrollView(this).apply {
-                      isHorizontalScrollBarEnabled = false
-                      clipToPadding = false
-                      descendantFocusability =
-                          ViewGroup.FOCUS_AFTER_DESCENDANTS
-                      setPadding(dp(8), dp(15), dp(30), dp(18))
+                  clock = text(
+                      SimpleDateFormat(
+                          "HH:mm",
+                          Locale.getDefault()
+                      ).format(Date()),
+                      16f,
+                      white,
+                      true
+                  ).apply {
+                      gravity = Gravity.CENTER
                   }
 
-                  rail = LinearLayout(this).apply {
-                      orientation = LinearLayout.HORIZONTAL
-                      gravity = Gravity.CENTER_VERTICAL
-                  }
+                  val clockParams =
+                      LinearLayout.LayoutParams(dp(75), dp(52))
+                  clockParams.marginStart = dp(25)
 
-                  railScroll.addView(rail)
+                  header.addView(clock, clockParams)
 
-                  parent.addView(
-                      railScroll,
-                      LinearLayout.LayoutParams(-1, dp(245))
-                  )
+                  page.addView(header)
               }
 
-              private fun createHero(parent: LinearLayout) {
-                  val hero = FrameLayout(this).apply {
-                      clipChildren = false
-                      clipToPadding = false
-                  }
-
-                  val info = LinearLayout(this).apply {
+              private fun createHome() {
+                  val intro = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
                       gravity = Gravity.CENTER_VERTICAL
-                      setPadding(0, dp(5), dp(10), dp(5))
                   }
 
-                  val eyebrow = label(
-                      "ИГРОВАЯ БИБЛИОТЕКА",
+                  val eyebrow = text(
+                      "ТВОЁ ПРОСТРАНСТВО",
                       11f,
-                      Color.rgb(170, 198, 255),
+                      Color.rgb(164, 195, 255),
                       true
                   )
 
-                  info.addView(eyebrow)
+                  intro.addView(eyebrow)
 
-                  title = label(
-                      "Добро пожаловать",
-                      36f,
+                  val heading = text(
+                      "Игры и развлечения",
+                      34f,
                       white,
                       true
-                  ).apply {
-                      maxLines = 1
-                      ellipsize = TextUtils.TruncateAt.END
-                  }
+                  )
 
-                  val titleParams =
-                      LinearLayout.LayoutParams(-1, dp(60))
-                  titleParams.topMargin = dp(8)
-                  info.addView(title, titleParams)
+                  val headingParams =
+                      LinearLayout.LayoutParams(-1, dp(55))
+                  headingParams.topMargin = dp(5)
 
-                  subtitle = label(
-                      "Выберите приложение, чтобы начать",
-                      15f,
+                  intro.addView(heading, headingParams)
+
+                  val description = text(
+                      "Всё установленное — в одном месте",
+                      14f,
                       muted
-                  ).apply {
-                      maxLines = 1
-                      ellipsize = TextUtils.TruncateAt.END
-                  }
-
-                  info.addView(subtitle)
-
-                  val hint = label(
-                      "✕  ЗАПУСТИТЬ",
-                      12f,
-                      white,
-                      true
-                  ).apply {
-                      background = bg(
-                          intArrayOf(
-                              Color.rgb(55, 111, 238),
-                              Color.rgb(39, 80, 190)
-                          ),
-                          22
-                      )
-                      gravity = Gravity.CENTER
-                      setPadding(
-                          dp(22), dp(12),
-                          dp(22), dp(12)
-                      )
-                  }
-
-                  val hintParams =
-                      LinearLayout.LayoutParams(-2, dp(43))
-                  hintParams.topMargin = dp(20)
-                  info.addView(hint, hintParams)
-
-                  hero.addView(
-                      info,
-                      FrameLayout.LayoutParams(
-                          dp(690),
-                          -1,
-                          Gravity.START or Gravity.CENTER_VERTICAL
-                      )
                   )
 
-                  heroIcon = ImageView(this).apply {
-                      scaleType = ImageView.ScaleType.FIT_CENTER
-                      alpha = 0.88f
-                  }
+                  intro.addView(description)
 
-                  hero.addView(
-                      heroIcon,
-                      FrameLayout.LayoutParams(
-                          dp(230),
-                          dp(230),
-                          Gravity.END or Gravity.CENTER_VERTICAL
-                      )
-                  )
+                  val introParams =
+                      LinearLayout.LayoutParams(-1, dp(115))
+                  introParams.topMargin = dp(20)
 
-                  val params =
-                      LinearLayout.LayoutParams(-1, 0, 1f)
-                  params.topMargin = dp(8)
-                  parent.addView(hero, params)
-              }
+                  page.addView(intro, introParams)
 
-              private fun createFooter(parent: LinearLayout) {
-                  val footer = LinearLayout(this).apply {
+                  val section = LinearLayout(this).apply {
                       orientation = LinearLayout.HORIZONTAL
                       gravity = Gravity.CENTER_VERTICAL
                   }
 
-                  val actions = listOf(
-                      "○  ВЫБРАТЬ",
-                      "△  НАСТРОЙКИ",
-                      "□  БИБЛИОТЕКА"
+                  val sectionTitle = text(
+                      "ТВОИ ПРИЛОЖЕНИЯ",
+                      12f,
+                      muted,
+                      true
                   )
 
-                  actions.forEachIndexed { index, value ->
-                      val item = label(
-                          value,
-                          11f,
-                          muted,
-                          true
-                      ).apply {
-                          gravity = Gravity.CENTER
-                          isFocusable = true
-                          setPadding(
-                              dp(15), dp(8),
-                              dp(15), dp(8)
-                          )
+                  section.addView(
+                      sectionTitle,
+                      LinearLayout.LayoutParams(0, dp(36), 1f)
+                  )
 
-                          setOnFocusChangeListener { view, focused ->
-                              (view as TextView).setTextColor(
-                                  if (focused) white else muted
-                              )
-                          }
+                  section.addView(
+                      text("${apps.size} ПРИЛОЖЕНИЙ", 10f, muted, true)
+                  )
 
-                          setOnClickListener {
-                              when (index) {
-                                  0 -> {
-                                      if (apps.isNotEmpty()) {
-                                          launch(apps[selected])
-                                      }
-                                  }
-                                  1 -> startActivity(
-                                      Intent(
-                                          android.provider.Settings.ACTION_SETTINGS
-                                      )
-                                  )
-                                  2 -> {
-                                      libraryMode = !libraryMode
-                                      refresh()
-                                  }
-                              }
-                          }
-                      }
+                  page.addView(section)
 
-                      footer.addView(item)
-                  }
-
-                  val params =
-                      LinearLayout.LayoutParams(-1, dp(45))
-                  params.topMargin = dp(4)
-                  parent.addView(footer, params)
-              }
-
-              private fun refresh() {
-                  if (!::rail.isInitialized) return
-
-                  rail.removeAllViews()
-
-                  val visible = if (libraryMode) {
-                      apps
-                  } else {
-                      apps.take(12)
-                  }
-
-                  count.text = "${apps.size} ПРИЛОЖЕНИЙ"
-
-                  if (visible.isEmpty()) {
-                      title.text = "Приложения не найдены"
-                      subtitle.text = "Установленные приложения появятся здесь"
-                      return
-                  }
-
-                  if (selected >= visible.size) selected = 0
-
-                  visible.forEachIndexed { index, app ->
-                      createTile(app, index)
-                  }
-
-                  rail.post {
-                      rail.getChildAt(selected)?.requestFocus()
-                  }
-
-                  updateHero(visible[selected])
-              }
-
-              private fun createTile(
-                  app: AppEntry,
-                  index: Int
-              ) {
-                  val tile = FrameLayout(this).apply {
-                      isFocusable = true
-                      isClickable = true
+                  val scroll = HorizontalScrollView(this).apply {
+                      isHorizontalScrollBarEnabled = false
                       clipChildren = false
                       clipToPadding = false
+                      setPadding(dp(8), dp(15), dp(30), dp(20))
                   }
 
-                  val cover = FrameLayout(this).apply {
-                      background = bg(
-                          intArrayOf(
-                              Color.rgb(35, 52, 83),
-                              Color.rgb(12, 20, 38)
-                          ),
-                          12
+                  val rail = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                  }
+
+                  apps.take(14).forEachIndexed { index, app ->
+                      rail.addView(
+                          createAppTile(app, index, false),
+                          LinearLayout.LayoutParams(
+                              dp(166),
+                              dp(188)
+                          ).apply {
+                              marginEnd = dp(19)
+                          }
                       )
-                      clipToOutline = true
+                  }
+
+                  scroll.addView(rail)
+
+                  val scrollParams =
+                      LinearLayout.LayoutParams(-1, dp(225))
+                  page.addView(scroll, scrollParams)
+
+                  if (apps.isEmpty()) {
+                      val empty = text(
+                          "Приложения не найдены",
+                          16f,
+                          muted
+                      )
+                      page.addView(empty)
+                  }
+
+                  val hint = text(
+                      "↓  ИСТОЧНИКИ HDMI     •     БИБЛИОТЕКА",
+                      11f,
+                      Color.rgb(180, 198, 231),
+                      true
+                  )
+
+                  val hintParams =
+                      LinearLayout.LayoutParams(-1, dp(40))
+                  hintParams.topMargin = dp(4)
+                  page.addView(hint, hintParams)
+              }
+
+              private fun createAppTile(
+                  app: AppEntry,
+                  index: Int,
+                  library: Boolean
+              ): View {
+                  val tile = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      gravity = Gravity.CENTER
+                      setPadding(dp(10), dp(10), dp(10), dp(8))
+                      background = gradient(
+                          intArrayOf(
+                              Color.rgb(27, 42, 70),
+                              Color.rgb(12, 19, 36)
+                          ),
+                          13
+                      )
+                  }
+
+                  focusStyle(tile)
+                  tile.tag = if (library && index == 0) {
+                      "first_library"
+                  } else if (!library && index == 0) {
+                      "first_app"
+                  } else {
+                      "app_$index"
                   }
 
                   val icon = ImageView(this).apply {
                       setImageDrawable(app.icon)
                       scaleType = ImageView.ScaleType.FIT_CENTER
-                      setPadding(
-                          dp(22), dp(22),
-                          dp(22), dp(22)
-                      )
                   }
 
-                  cover.addView(
-                      icon,
-                      FrameLayout.LayoutParams(-1, -1)
-                  )
-
                   tile.addView(
-                      cover,
-                      FrameLayout.LayoutParams(-1, dp(143))
+                      icon,
+                      LinearLayout.LayoutParams(
+                          dp(82),
+                          dp(82)
+                      )
                   )
 
-                  val name = label(
+                  val name = text(
                       app.name,
                       12f,
                       white,
                       true
                   ).apply {
                       gravity = Gravity.CENTER
+                      textAlignment = View.TEXT_ALIGNMENT_CENTER
                       maxLines = 2
                       ellipsize = TextUtils.TruncateAt.END
-                      textAlignment = View.TEXT_ALIGNMENT_CENTER
                   }
 
-                  val nameParams = FrameLayout.LayoutParams(
-                      -1,
-                      dp(42),
-                      Gravity.BOTTOM
-                  )
+                  val nameParams =
+                      LinearLayout.LayoutParams(-1, dp(48))
+                  nameParams.topMargin = dp(10)
 
                   tile.addView(name, nameParams)
 
                   tile.setOnFocusChangeListener { view, focused ->
                       view.animate()
-                          .scaleX(if (focused) 1.12f else 1f)
-                          .scaleY(if (focused) 1.12f else 1f)
-                          .setDuration(180)
+                          .scaleX(if (focused) 1.07f else 1f)
+                          .scaleY(if (focused) 1.07f else 1f)
+                          .setDuration(150)
                           .start()
 
-                      cover.background = bg(
+                      view.background = gradient(
                           if (focused) {
                               intArrayOf(
-                                  Color.rgb(65, 125, 255),
-                                  Color.rgb(35, 75, 170)
+                                  Color.rgb(53, 102, 190),
+                                  Color.rgb(22, 43, 89)
                               )
                           } else {
                               intArrayOf(
-                                  Color.rgb(35, 52, 83),
-                                  Color.rgb(12, 20, 38)
+                                  Color.rgb(27, 42, 70),
+                                  Color.rgb(12, 19, 36)
                               )
                           },
-                          12
+                          13
                       )
-
-                      if (focused) {
-                          selected = index
-                          updateHero(app)
-                          railScroll.smoothScrollTo(
-                              maxOf(0, view.left - dp(30)),
-                              0
-                          )
-                      }
                   }
 
                   tile.setOnClickListener {
-                      launch(app)
+                      launchApp(app)
                   }
 
-                  val params = LinearLayout.LayoutParams(
-                      dp(165),
-                      dp(190)
-                  )
-                  params.marginEnd = dp(20)
-                  rail.addView(tile, params)
+                  return tile
               }
 
-              private fun updateHero(app: AppEntry) {
-                  title.text = app.name
-                  subtitle.text = app.packageName
-                  heroIcon.setImageDrawable(app.icon)
+              private fun createHdmi() {
+                  val heading = text(
+                      "Источники сигнала",
+                      34f,
+                      white,
+                      true
+                  )
 
-                  val index = apps.indexOf(app).coerceAtLeast(0)
+                  val headingParams =
+                      LinearLayout.LayoutParams(-1, dp(65))
+                  headingParams.topMargin = dp(25)
 
-                  background.background = bg(
-                      palette(index)
+                  page.addView(heading, headingParams)
+
+                  page.addView(
+                      text(
+                          "Выбери устройство, подключённое к телевизору",
+                          14f,
+                          muted
+                      )
+                  )
+
+                  val list = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                  }
+
+                  sources.forEachIndexed { index, source ->
+                      val card = createSourceTile(source, index)
+
+                      val params =
+                          LinearLayout.LayoutParams(0, dp(205), 1f)
+                      params.marginEnd = dp(18)
+
+                      list.addView(card, params)
+                  }
+
+                  val listParams =
+                      LinearLayout.LayoutParams(-1, dp(230))
+                  listParams.topMargin = dp(32)
+
+                  page.addView(list, listParams)
+
+                  if (sources.isEmpty()) {
+                      page.addView(
+                          text(
+                              "Телевизор не предоставил список HDMI-входов",
+                              15f,
+                              muted
+                          )
+                      )
+                  }
+
+                  page.addView(
+                      text(
+                          "Нажми ✕, чтобы открыть выбранный источник",
+                          12f,
+                          muted
+                      )
                   )
               }
 
-              private fun launch(app: AppEntry) {
+              private fun createSourceTile(
+                  source: TvSource,
+                  index: Int
+              ): View {
+                  val card = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      gravity = Gravity.CENTER
+                      setPadding(dp(18), dp(15), dp(18), dp(15))
+                      background = gradient(
+                          intArrayOf(
+                              Color.rgb(28, 42, 68),
+                              Color.rgb(12, 19, 36)
+                          ),
+                          15
+                      )
+                  }
+
+                  focusStyle(card)
+
+                  if (index == 0) card.tag = "first_source"
+
+                  val symbol = text(
+                      source.symbol,
+                      if (source.symbol == "PS5") 31f else 25f,
+                      white,
+                      true
+                  ).apply {
+                      gravity = Gravity.CENTER
+                  }
+
+                  card.addView(
+                      symbol,
+                      LinearLayout.LayoutParams(-1, dp(75))
+                  )
+
+                  val name = text(
+                      source.name,
+                      19f,
+                      white,
+                      true
+                  ).apply {
+                      gravity = Gravity.CENTER
+                      textAlignment = View.TEXT_ALIGNMENT_CENTER
+                      maxLines = 2
+                  }
+
+                  card.addView(
+                      name,
+                      LinearLayout.LayoutParams(-1, dp(55))
+                  )
+
+                  val subtitle = text(
+                      source.subtitle,
+                      9f,
+                      muted,
+                      true
+                  ).apply {
+                      gravity = Gravity.CENTER
+                      textAlignment = View.TEXT_ALIGNMENT_CENTER
+                      maxLines = 2
+                  }
+
+                  card.addView(subtitle)
+
+                  card.setOnFocusChangeListener { view, focused ->
+                      view.animate()
+                          .scaleX(if (focused) 1.055f else 1f)
+                          .scaleY(if (focused) 1.055f else 1f)
+                          .setDuration(150)
+                          .start()
+
+                      view.background = gradient(
+                          if (focused) {
+                              intArrayOf(
+                                  Color.rgb(49, 102, 194),
+                                  Color.rgb(19, 44, 99)
+                              )
+                          } else {
+                              intArrayOf(
+                                  Color.rgb(28, 42, 68),
+                                  Color.rgb(12, 19, 36)
+                              )
+                          },
+                          15
+                      )
+                  }
+
+                  card.setOnClickListener {
+                      switchInput(source)
+                  }
+
+                  return card
+              }
+
+              private fun switchInput(source: TvSource) {
+                  try {
+                      val uri =
+                          TvContract.buildChannelUriForPassthroughInput(
+                              source.inputId
+                          )
+
+                      val intent = Intent(
+                          Intent.ACTION_VIEW,
+                          uri
+                      ).apply {
+                          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                      }
+
+                      startActivity(intent)
+                  } catch (_: Exception) {
+                      Toast.makeText(
+                          this,
+                          "Прошивка не разрешила переключить вход напрямую",
+                          Toast.LENGTH_LONG
+                      ).show()
+
+                      try {
+                          startActivity(
+                              Intent(
+                                  android.provider.Settings.ACTION_SETTINGS
+                              )
+                          )
+                      } catch (_: Exception) {
+                      }
+                  }
+              }
+
+              private fun createLibrary() {
+                  val heading = text(
+                      "Библиотека",
+                      34f,
+                      white,
+                      true
+                  )
+
+                  val headingParams =
+                      LinearLayout.LayoutParams(-1, dp(70))
+                  headingParams.topMargin = dp(20)
+
+                  page.addView(heading, headingParams)
+
+                  page.addView(
+                      text(
+                          "${apps.size} установленных приложений",
+                          14f,
+                          muted
+                      )
+                  )
+
+                  val scroll = ScrollView(this).apply {
+                      isVerticalScrollBarEnabled = false
+                  }
+
+                  val grid = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                  }
+
+                  val columns = 5
+
+                  apps.forEachIndexed { index, app ->
+                      if (index % columns == 0) {
+                          grid.addView(
+                              LinearLayout(this).apply {
+                                  orientation = LinearLayout.HORIZONTAL
+                                  gravity = Gravity.CENTER_VERTICAL
+                              },
+                              LinearLayout.LayoutParams(-1, dp(180))
+                          )
+                      }
+
+                      val row = grid.getChildAt(
+                          grid.childCount - 1
+                      ) as LinearLayout
+
+                      row.addView(
+                          createAppTile(app, index, true),
+                          LinearLayout.LayoutParams(
+                              0,
+                              dp(160),
+                              1f
+                          ).apply {
+                              marginEnd = dp(13)
+                          }
+                      )
+                  }
+
+                  scroll.addView(grid)
+
+                  page.addView(
+                      scroll,
+                      LinearLayout.LayoutParams(-1, 0, 1f)
+                  )
+              }
+
+              private fun createDock() {
+                  val dock = LinearLayout(this).apply {
+                      orientation = LinearLayout.HORIZONTAL
+                      gravity = Gravity.CENTER_VERTICAL
+                      background = gradient(
+                          intArrayOf(
+                              Color.argb(210, 20, 29, 49),
+                              Color.argb(225, 9, 14, 27)
+                          ),
+                          18
+                      )
+                      setPadding(dp(12), dp(5), dp(12), dp(5))
+                  }
+
+                  val items = listOf(
+                      Triple("⌂", "ГЛАВНАЯ", Screen.HOME),
+                      Triple("▣", "HDMI", Screen.HDMI),
+                      Triple("▤", "БИБЛИОТЕКА", Screen.LIBRARY)
+                  )
+
+                  items.forEach { item ->
+                      val button = LinearLayout(this).apply {
+                          orientation = LinearLayout.HORIZONTAL
+                          gravity = Gravity.CENTER
+                          setPadding(dp(20), dp(8), dp(20), dp(8))
+                      }
+
+                      val symbol = text(
+                          item.first,
+                          19f,
+                          white,
+                          true
+                      )
+
+                      button.addView(symbol)
+
+                      val name = text(
+                          item.second,
+                          11f,
+                          muted,
+                          true
+                      )
+
+                      val nameParams =
+                          LinearLayout.LayoutParams(-2, dp(36))
+                      nameParams.marginStart = dp(9)
+
+                      button.addView(name, nameParams)
+
+                      focusStyle(button)
+
+                      button.tag = when (item.third) {
+                          Screen.HOME -> "dock_home"
+                          Screen.HDMI -> "dock_hdmi"
+                          Screen.LIBRARY -> "dock_library"
+                      }
+
+                      button.setOnClickListener {
+                          if (currentPage != item.third) {
+                              showScreen(item.third)
+                          }
+                      }
+
+                      dock.addView(
+                          button,
+                          LinearLayout.LayoutParams(
+                              0,
+                              dp(48),
+                              1f
+                          )
+                      )
+                  }
+
+                  val settings = text(
+                      "⚙",
+                      22f,
+                      muted,
+                      true
+                  ).apply {
+                      gravity = Gravity.CENTER
+                      isFocusable = true
+                      setPadding(dp(20), 0, dp(20), 0)
+                      setOnClickListener {
+                          try {
+                              startActivity(
+                                  Intent(
+                                      android.provider.Settings.ACTION_SETTINGS
+                                  )
+                              )
+                          } catch (_: Exception) {
+                          }
+                      }
+                  }
+
+                  dock.addView(
+                      settings,
+                      LinearLayout.LayoutParams(dp(65), dp(48))
+                  )
+
+                  val params =
+                      LinearLayout.LayoutParams(-1, dp(60))
+                  params.topMargin = dp(8)
+
+                  page.addView(dock, params)
+              }
+
+              private fun launchApp(app: AppEntry) {
                   try {
                       val intent =
                           packageManager.getLaunchIntentForPackage(
                               app.packageName
                           )
 
-                      if (intent != null) startActivity(intent)
+                      if (intent != null) {
+                          startActivity(intent)
+                      } else {
+                          Toast.makeText(
+                              this,
+                              "Не удалось открыть приложение",
+                              Toast.LENGTH_SHORT
+                          ).show()
+                      }
                   } catch (_: Exception) {
+                      Toast.makeText(
+                          this,
+                          "Ошибка запуска приложения",
+                          Toast.LENGTH_SHORT
+                      ).show()
                   }
               }
 
@@ -796,20 +1113,63 @@ jobs:
                   event: KeyEvent?
               ): Boolean {
                   if (keyCode == KeyEvent.KEYCODE_BACK) {
-                      if (libraryMode) {
-                          libraryMode = false
-                          refresh()
-                          return true
+                      when (currentPage) {
+                          Screen.HDMI, Screen.LIBRARY -> {
+                              showScreen(Screen.HOME)
+                              return true
+                          }
+
+                          Screen.HOME -> return super.onKeyDown(
+                              keyCode,
+                              event
+                          )
                       }
                   }
 
                   if (keyCode == KeyEvent.KEYCODE_MENU) {
-                      startActivity(
-                          Intent(
-                              android.provider.Settings.ACTION_SETTINGS
-                          )
-                      )
+                      showScreen(Screen.HDMI)
                       return true
+                  }
+
+                  if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                      val focused = currentFocus
+
+                      if (
+                          currentPage == Screen.HOME &&
+                          focused?.tag?.toString()?.startsWith("app_") == true ||
+                          currentPage == Screen.HOME &&
+                          focused?.tag == "first_app"
+                      ) {
+                          page.findViewWithTag<View>("dock_hdmi")
+                              ?.requestFocus()
+                          return true
+                      }
+                  }
+
+                  if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                      val focused = currentFocus
+
+                      if (
+                          focused?.tag == "dock_hdmi" ||
+                          focused?.tag == "dock_home" ||
+                          focused?.tag == "dock_library"
+                      ) {
+                          when (currentPage) {
+                              Screen.HOME -> page
+                                  .findViewWithTag<View>("first_app")
+                                  ?.requestFocus()
+
+                              Screen.HDMI -> page
+                                  .findViewWithTag<View>("first_source")
+                                  ?.requestFocus()
+
+                              Screen.LIBRARY -> page
+                                  .findViewWithTag<View>("first_library")
+                                  ?.requestFocus()
+                          }
+
+                          return true
+                      }
                   }
 
                   return super.onKeyDown(keyCode, event)
@@ -825,5 +1185,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Amethyst-PS-Edition-v6
+          name: Amethyst-TV-OS-v7
           path: amethyst/app/build/outputs/apk/debug/app-debug.apk
