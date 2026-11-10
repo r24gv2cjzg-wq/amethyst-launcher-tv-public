@@ -29,7 +29,38 @@ jobs:
         run: |
           mkdir source
           unzip AmethystLauncher-source.zip -d source
-          find source -name settings.gradle.kts
+
+      - name: Fix JVM compatibility
+        run: |
+          APP_FILE=$(find source -path '*/app/build.gradle.kts' -print -quit)
+          test -n "$APP_FILE"
+
+          python3 - "$APP_FILE" <<'PY'
+          import sys
+          from pathlib import Path
+
+          p = Path(sys.argv[1])
+          s = p.read_text()
+
+          if "compileOptions {" not in s:
+              needle = "    compileSdk = 35\n"
+              addition = """
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          """
+              if needle not in s:
+                  raise SystemExit("Could not find compileSdk = 35")
+              s = s.replace(needle, needle + addition, 1)
+
+          p.write_text(s)
+          print("JVM compatibility fixed:", p)
+          PY
 
       - name: Build APK
         run: |
